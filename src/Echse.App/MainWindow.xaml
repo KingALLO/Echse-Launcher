@@ -5,7 +5,7 @@
     Title="Echse Launcher">
     <Grid x:Name="Root" Background="{ThemeResource LauncherSurfaceTint}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="42"/>
+            <RowDefinition Height="36"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
         <Grid x:Name="TitleBar" Background="{ThemeResource LauncherLibrarySidebarBrush}">
@@ -32,10 +32,10 @@
                         <ResourceDictionary x:Key="Dark">
                             <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="Transparent"/>
                             <SolidColorBrush x:Key="NavigationViewExpandedPaneBackground" Color="Transparent"/>
-                            <SolidColorBrush x:Key="NavigationViewTopPaneBackground" Color="#B321000C"/>
+                            <SolidColorBrush x:Key="NavigationViewTopPaneBackground" Color="#F2201314"/>
                             <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent"/>
                             <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent"/>
-                            <SolidColorBrush x:Key="NavigationViewSelectionIndicatorForeground" Color="#DC819B"/>
+                            <SolidColorBrush x:Key="NavigationViewSelectionIndicatorForeground" Color="#FF9592"/>
                         </ResourceDictionary>
                         <ResourceDictionary x:Key="HighContrast">
                             <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="{ThemeResource SystemColorWindowColor}"/>
@@ -53,18 +53,14 @@
                 <NavigationViewItem Content="Downloads" Tag="downloads" Icon="Download"/>
                 <NavigationViewItem Content="Mein Profil" Tag="profile" Icon="Contact"/>
             </NavigationView.MenuItems>
-            <Grid Padding="20,18,20,20">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-                <InfoBar x:Name="Notice" IsOpen="False" IsClosable="True" Margin="0,0,0,12"/>
-                <Grid x:Name="PageLayout" Grid.Row="1">
+            <Grid Padding="12">
+                <Grid x:Name="PageLayout">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition x:Name="SidebarColumn" Width="240"/>
+                        <ColumnDefinition x:Name="SidebarColumn" Width="220"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <Grid x:Name="LibrarySidebar" Margin="-20,-18,16,-20" Padding="10,10,6,12"
+                    <Grid x:Name="LibrarySidebar" Padding="10"
+                          CornerRadius="{StaticResource LauncherCornerRadius}"
                           Background="{ThemeResource LauncherLibrarySidebarBrush}" Visibility="Collapsed" RowSpacing="10">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -112,14 +108,15 @@
                             </ListView.ItemTemplate>
                         </ListView>
                     </Grid>
-                    <Grid x:Name="CatalogSidebar" Width="220" Margin="0,0,20,0" Visibility="Collapsed"
+                    <Grid x:Name="CatalogSidebar" Padding="8" Visibility="Collapsed"
+                          CornerRadius="{StaticResource LauncherCornerRadius}"
                           Background="{ThemeResource LauncherLibrarySidebarBrush}">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
                         <TextBlock Text="SPIELE ENTDECKEN" Foreground="{ThemeResource LauncherAccentBrush}" FontSize="11"
-                                   CharacterSpacing="120" Margin="10,8,0,16"/>
+                                   CharacterSpacing="120" Margin="8,4,0,12"/>
                         <ListView x:Name="CatalogGameList" Grid.Row="1" SelectionMode="None"
                                   IsItemClickEnabled="True" ItemClick="CatalogGameList_ItemClick"
                                   DisplayMemberPath="Title">
@@ -134,8 +131,8 @@
                     </Grid>
                     <ScrollViewer x:Name="PageScroll" Grid.Column="1" HorizontalScrollBarVisibility="Disabled"
                                   HorizontalContentAlignment="Stretch"
-                                  VerticalScrollBarVisibility="Auto" Padding="0,0,12,0">
-                        <StackPanel x:Name="PageHost" Spacing="24" MaxWidth="1460" HorizontalAlignment="Left"/>
+                                  VerticalScrollBarVisibility="Auto" Padding="0,4,4,4">
+                        <StackPanel x:Name="PageHost" Spacing="16" MaxWidth="1460" HorizontalAlignment="Left"/>
                     </ScrollViewer>
                 </Grid>
             </Grid>
@@ -197,5 +194,10 @@
                 </StackPanel>
             </Grid>
         </Grid>
+        <InfoBar x:Name="Notice" Grid.Row="1" IsOpen="False" IsClosable="True"
+                 HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="16"
+                 MaxWidth="420" CornerRadius="{StaticResource LauncherCornerRadius}"
+                 Background="{ThemeResource LauncherDialogBrush}"
+                 BorderBrush="{ThemeResource LauncherBorderBrush}" BorderThickness="1"/>
     </Grid>
 </Window>

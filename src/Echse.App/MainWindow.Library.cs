@@ -63,15 +63,17 @@ public sealed partial class MainWindow
         var shelves = new StackPanel { Spacing = 16 };
         PageHost.Children.Add(shelves);
 
-        var header = new Grid { ColumnSpacing = 14, RowSpacing = 10 };
+        var header = new Grid { ColumnSpacing = 12 };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         for (var i = 0; i < 3; i++) header.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var count = Text("", 18);
+        count.MaxLines = 1;
+        count.TextTrimming = TextTrimming.CharacterEllipsis;
         var sort = new ComboBox
         {
-            Width = 180, ItemsSource = new[] { "Zuletzt gespielt", "Titel A–Z", "Spielzeit", "Favoriten zuerst" },
+            Width = 170, ItemsSource = new[] { "Zuletzt gespielt", "Titel A–Z", "Spielzeit", "Favoriten zuerst" },
             SelectedIndex = librarySort
         };
         AutomationProperties.SetName(sort, "Spiele sortieren");
@@ -91,17 +93,24 @@ public sealed partial class MainWindow
         header.Children.Add(count);
         header.Children.Add(sort);
         header.Children.Add(tools);
-        header.SizeChanged += (_, _) =>
+        void ArrangeHeader(double width)
         {
-            var narrow = header.ActualWidth < 680;
-            header.RowSpacing = narrow ? 10 : 0;
-            Grid.SetRow(sort, narrow ? 1 : 0);
-            Grid.SetColumn(sort, narrow ? 0 : 1);
-            Grid.SetRow(tools, narrow ? 2 : 0);
-            Grid.SetColumn(tools, narrow ? 0 : 2);
+            var wide = width >= 640;
+            var compact = width < 420;
+            Grid.SetColumnSpan(count, compact ? 3 : 1);
+            Grid.SetRow(sort, compact ? 1 : 0);
+            Grid.SetColumn(sort, compact ? 0 : 1);
+            Grid.SetColumnSpan(sort, compact ? 3 : wide ? 1 : 2);
+            Grid.SetRow(tools, wide ? 0 : compact ? 2 : 1);
+            Grid.SetColumn(tools, wide ? 2 : 0);
+            Grid.SetColumnSpan(tools, wide ? 1 : 3);
             sort.HorizontalAlignment = HorizontalAlignment.Left;
-            tools.HorizontalAlignment = narrow ? HorizontalAlignment.Left : HorizontalAlignment.Right;
-        };
+            tools.HorizontalAlignment = wide ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+            sort.Margin = new Thickness(0, compact ? 8 : 0, 0, 0);
+            tools.Margin = new Thickness(0, wide ? 0 : 8, 0, 0);
+        }
+        ArrangeHeader(0);
+        header.SizeChanged += (_, args) => ArrangeHeader(args.NewSize.Width);
         PageHost.Children.Add(header);
         var results = new StackPanel();
         PageHost.Children.Add(results);
@@ -143,7 +152,8 @@ public sealed partial class MainWindow
             var grid = new GridView
             {
                 SelectionMode = ListViewSelectionMode.None, IsItemClickEnabled = false, IsTabStop = false,
-                HorizontalAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(0)
+                HorizontalAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(0),
+                ItemContainerStyle = (Style)Application.Current.Resources["ArtworkGridItemStyle"]
             };
             ScrollViewer.SetVerticalScrollBarVisibility(grid, ScrollBarVisibility.Disabled);
             ScrollViewer.SetVerticalScrollMode(grid, ScrollMode.Disabled);
@@ -185,8 +195,7 @@ public sealed partial class MainWindow
         var game = entry.Game;
         var portrait = game.PortraitUrl ?? (game.SteamAppId is int id ? SteamCatalogService.PortraitUrl(id) : null);
         var art = Cover(game, 112, 168, portrait, fallbackToCover: true);
-        art.CornerRadius = new CornerRadius(2);
-        var body = new Grid { Width = 112, Height = 168 };
+        var body = new Grid { Width = 112, Height = 168, CornerRadius = Rounded };
         body.Children.Add(art);
         if (portrait is null && string.IsNullOrWhiteSpace(game.CoverUrl))
         {
@@ -218,7 +227,7 @@ public sealed partial class MainWindow
         var game = entry.Game;
         var body = new StackPanel { Width = 234 };
         var cover = Cover(game, 234, 110, game.BannerUrl ?? game.CoverUrl);
-        cover.CornerRadius = new CornerRadius(2, 2, 0, 0);
+        cover.CornerRadius = new CornerRadius(Rounded.TopLeft, Rounded.TopRight, 0, 0);
         body.Children.Add(LibraryCardButton(cover, game));
         var footer = new Grid { Height = 58, Padding = new Thickness(6), ColumnSpacing = 8 };
         footer.Background = (Brush)Application.Current.Resources["LauncherLibraryOverlayBrush"];
@@ -234,7 +243,6 @@ public sealed partial class MainWindow
         play.Width = 40;
         play.Height = 40;
         play.Padding = new Thickness(0);
-        play.CornerRadius = new CornerRadius(2);
         play.Background = (Brush)Application.Current.Resources["LauncherActionBrush"];
         play.Foreground = Brush(255, 255, 255);
         play.IsEnabled = !running && !string.IsNullOrWhiteSpace(entry.ExecutablePath);
@@ -255,7 +263,7 @@ public sealed partial class MainWindow
         Grid.SetColumn(info, 1);
         footer.Children.Add(info);
         body.Children.Add(footer);
-        return body;
+        return new Border { Child = body, CornerRadius = Rounded };
     }
 
     private Button LibraryCardButton(UIElement content, Game game)
@@ -264,7 +272,6 @@ public sealed partial class MainWindow
         button.Padding = new Thickness(0);
         button.BorderThickness = new Thickness(0);
         button.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
-        button.CornerRadius = new CornerRadius(2);
         button.VerticalAlignment = VerticalAlignment.Top;
         AutomationProperties.SetName(button, game.Title + " – Spieldetails öffnen");
         return button;

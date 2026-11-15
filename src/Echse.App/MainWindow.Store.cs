@@ -50,7 +50,7 @@ public sealed partial class MainWindow
         var source = new ComboBox
         {
             ItemsSource = new[] { "Steam · Online-Katalog", "Eigener Download-Katalog" },
-            SelectedIndex = useServerCatalog ? 1 : 0, MinWidth = 240,
+            SelectedIndex = useServerCatalog ? 1 : 0, Width = 240,
             HorizontalAlignment = HorizontalAlignment.Left
         };
         source.SelectionChanged += async (_, _) =>
@@ -65,10 +65,32 @@ public sealed partial class MainWindow
             return;
         }
 
-        var header = Row();
+        var header = new Grid { ColumnSpacing = 12 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        for (var i = 0; i < 3; i++) header.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var refresh = Button("Aktualisieren", RefreshSteamHomeAsync);
+        refresh.HorizontalAlignment = HorizontalAlignment.Left;
         header.Children.Add(Text("Entdecken", 28));
         header.Children.Add(source);
-        header.Children.Add(Button("Aktualisieren", RefreshSteamHomeAsync));
+        header.Children.Add(refresh);
+        void ArrangeHeader(double width)
+        {
+            var wide = width >= 600;
+            var compact = width < 420;
+            source.Width = Math.Min(240, Math.Max(0, width));
+            Grid.SetColumn(source, wide ? 1 : 0);
+            Grid.SetRow(source, wide ? 0 : 1);
+            Grid.SetColumnSpan(source, wide ? 1 : compact ? 3 : 2);
+            Grid.SetColumn(refresh, compact ? 0 : 2);
+            Grid.SetRow(refresh, wide ? 0 : compact ? 2 : 1);
+            Grid.SetColumnSpan(refresh, compact ? 3 : 1);
+            source.Margin = new Thickness(0, wide ? 0 : 8, 0, 0);
+            refresh.Margin = new Thickness(0, wide ? 0 : 8, 0, 0);
+        }
+        ArrangeHeader(0);
+        header.SizeChanged += (_, args) => ArrangeHeader(args.NewSize.Width);
         PageHost.Children.Add(header);
         PageHost.Children.Add(Text("Deine nächste Spielewelt. Live-Metadaten von Steam · Downloads separat.", 12, Muted));
         var searchRow = new Grid { ColumnSpacing = 10 };
@@ -146,7 +168,7 @@ public sealed partial class MainWindow
 
     private FrameworkElement Shelf(string title, string subtitle, IEnumerable<Game> games, bool portrait)
     {
-        var section = new StackPanel { Spacing = 12 };
+        var section = new StackPanel { Spacing = 10 };
         section.Children.Add(SectionHeading(title, subtitle));
         var cards = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         foreach (var game in games)
@@ -157,7 +179,7 @@ public sealed partial class MainWindow
                 ? game.PortraitUrl ?? (game.SteamAppId is int id ? SteamCatalogService.PortraitUrl(id) : null) : null;
             body.Children.Add(Cover(game, width, portrait ? 228 : 138, portraitUrl, fallbackToCover: portrait));
             var name = Text(game.Title, 13);
-            name.MaxLines = 2;
+            name.MaxLines = 1;
             name.TextTrimming = TextTrimming.CharacterEllipsis;
             body.Children.Add(name);
             var label = Text(state.Library.Any(entry => entry.Game.Id == game.Id) ? "IN DEINER BIBLIOTHEK" : "STEAM", 10, Muted);
@@ -174,7 +196,7 @@ public sealed partial class MainWindow
         {
             Content = cards, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollMode = ScrollMode.Enabled, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            VerticalScrollMode = ScrollMode.Disabled, Padding = new Thickness(0, 0, 0, 12)
+            VerticalScrollMode = ScrollMode.Disabled, Padding = new Thickness(0, 0, 0, 4)
         });
         return section;
     }

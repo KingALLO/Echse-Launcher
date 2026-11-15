@@ -18,10 +18,8 @@ public sealed partial class MainWindow
         if (pending.Count == 0) return;
         var token = BeginOnlineRequest();
         var version = renderVersion;
-        Notice.Title = "Online-Cover";
-        Notice.Message = "Fehlende Cover werden anhand der Spieltitel bei Steam gesucht …";
-        Notice.Severity = InfoBarSeverity.Informational;
-        Notice.IsOpen = true;
+        ShowNotice("Online-Cover", "Fehlende Cover werden anhand der Spieltitel bei Steam gesucht …",
+            InfoBarSeverity.Informational);
         var found = 0;
         try
         {
@@ -40,14 +38,12 @@ public sealed partial class MainWindow
                     refreshLibrary?.Invoke();
                 }
                 artworkAttempted.Add(game.Id);
-                Notice.Message = $"{artworkAttempted.Count} Titel geprüft; {found} Cover in diesem Durchlauf zugeordnet.";
                 await Task.Delay(TimeSpan.FromSeconds(1), token);
             }
-            Notice.Title = "Online-Coversuche abgeschlossen";
-            Notice.Message = $"{found} von {pending.Count} Covern zugeordnet. " +
+            ShowNotice("Online-Coversuche abgeschlossen", $"{found} von {pending.Count} Covern zugeordnet. " +
                 "Bei fehlenden oder mehrdeutigen Treffern kannst du in den Spieldetails „Online-Cover auswählen“ verwenden. " +
-                "Weitere fehlende Titel lassen sich mit „Cover laden“ prüfen.";
-            Notice.Severity = found < pending.Count ? InfoBarSeverity.Warning : InfoBarSeverity.Informational;
+                "Weitere fehlende Titel lassen sich mit „Cover laden“ prüfen.",
+                found < pending.Count ? InfoBarSeverity.Warning : InfoBarSeverity.Informational);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }
@@ -90,10 +86,9 @@ public sealed partial class MainWindow
             if (token.IsCancellationRequested || version != renderVersion || closing) return;
             if (matches.Count == 0)
             {
-                Notice.Title = "Kein Cover gefunden";
-                Notice.Message = "Steam hat keine passenden Titel geliefert. Versuche einen anderen Spielnamen.";
-                Notice.Severity = InfoBarSeverity.Warning;
-                Notice.IsOpen = true;
+                ShowNotice("Kein Cover gefunden",
+                    "Steam hat keine passenden Titel geliefert. Versuche einen anderen Spielnamen.",
+                    InfoBarSeverity.Warning);
                 return;
             }
             var list = new ListView

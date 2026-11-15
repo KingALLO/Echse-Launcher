@@ -18,6 +18,7 @@ public sealed partial class MainWindow : Window
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(25) };
     private readonly PlayTracker tracker;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(5) };
+    private readonly DispatcherTimer noticeTimer = new();
     private LauncherState state = new();
     private List<Game> catalog = [];
     private string page = "store";
@@ -34,10 +35,22 @@ public sealed partial class MainWindow : Window
     private static SolidColorBrush Muted => (SolidColorBrush)Application.Current.Resources["LauncherMutedBrush"];
     private static SolidColorBrush Surface => (SolidColorBrush)Application.Current.Resources["LauncherPanelBrush"];
     private static SolidColorBrush SurfaceBorder => (SolidColorBrush)Application.Current.Resources["LauncherBorderBrush"];
+    private static CornerRadius Rounded => (CornerRadius)Application.Current.Resources["LauncherCornerRadius"];
 
     public MainWindow()
     {
         InitializeComponent();
+        noticeTimer.Tick += (_, _) =>
+        {
+            noticeTimer.Stop();
+            Notice.IsOpen = false;
+        };
+        Notice.Closed += (_, _) => noticeTimer.Stop();
+        Notice.PointerEntered += (_, _) => noticeTimer.Stop();
+        Notice.PointerExited += (_, _) =>
+        {
+            if (Notice.IsOpen) noticeTimer.Start();
+        };
         PageScroll.SizeChanged += (_, _) => SizePageContent();
         PageLayout.SizeChanged += (_, _) => SizePageContent();
         steam = new SteamCatalogService(http);
@@ -124,16 +137,12 @@ public sealed partial class MainWindow : Window
         refreshLibrary = null;
         libraryInlineSearch = null;
         PageHost.Children.Clear();
-        PageHost.Spacing = page is "store" or "game" or "library" ? 18 : 24;
-        var showSidebar = page is "store" or "game" && !ShowingLibrary;
-        CatalogSidebar.Visibility = showSidebar ? Visibility.Visible : Visibility.Collapsed;
-        SidebarColumn.Width = new GridLength(showSidebar ? 240 : 0);
         if (ShowingLibrary)
         {
             LibrarySearch.Text = libraryQuery;
             UpdateLibrarySidebar();
         }
-        PageHost.MaxWidth = page is "profile" or "profile-edit" ? 1120 : 1460;
+        PageHost.MaxWidth = page is "profile" or "profile-edit" ? 1120 : double.PositiveInfinity;
         SizePageContent();
         UpdateCatalogSidebar();
         PageScroll.ChangeView(null, 0, null, true);
@@ -160,12 +169,17 @@ public sealed partial class MainWindow : Window
 
     private void SizePageContent()
     {
-        var showLibrarySidebar = ShowingLibrary && PageLayout.ActualWidth >= 680;
+        var showLibrarySidebar = ShowingLibrary && PageLayout.ActualWidth >= 760;
+        var showCatalogSidebar = !ShowingLibrary && (page is "store" or "game") && PageLayout.ActualWidth >= 900;
         LibrarySidebar.Visibility = showLibrarySidebar ? Visibility.Visible : Visibility.Collapsed;
-        if (ShowingLibrary) SidebarColumn.Width = new GridLength(showLibrarySidebar ? 212 : 0);
+        CatalogSidebar.Visibility = showCatalogSidebar ? Visibility.Visible : Visibility.Collapsed;
+        SidebarColumn.Width = new GridLength(showLibrarySidebar || showCatalogSidebar ? 220 : 0);
+        PageLayout.ColumnSpacing = showLibrarySidebar || showCatalogSidebar ? 16 : 0;
         if (libraryInlineSearch is not null)
             libraryInlineSearch.Visibility = showLibrarySidebar ? Visibility.Collapsed : Visibility.Visible;
-        PageHost.Width = Math.Max(0, PageScroll.ActualWidth - PageScroll.Padding.Left - PageScroll.Padding.Right);
+        PageHost.Width = Math.Min(PageHost.MaxWidth,
+            Math.Max(0, PageScroll.ActualWidth - PageScroll.Padding.Left - PageScroll.Padding.Right));
+        Notice.MaxWidth = Math.Min(420, Math.Max(0, Root.ActualWidth - 32));
     }
 
     private void RenderServerStore()
@@ -240,7 +254,7 @@ public sealed partial class MainWindow : Window
         art.Children.Add(Text("PLAY. EXPLORE. REPEAT.", 10, Accent));
         Grid.SetColumn(art, 1);
         content.Children.Add(art);
-        return new Border { CornerRadius = new CornerRadius(14), Background = Gradient(), Child = content };
+        return new Border { CornerRadius = Rounded, Background = Gradient(), Child = content };
     }
 
     private FrameworkElement GameGrid(IEnumerable<Game> games, bool library = false)
@@ -250,7 +264,8 @@ public sealed partial class MainWindow : Window
             SelectionMode = ListViewSelectionMode.None,
             IsItemClickEnabled = false,
             HorizontalAlignment = HorizontalAlignment.Stretch,
-            IsTabStop = false
+            IsTabStop = false,
+            ItemContainerStyle = (Style)Application.Current.Resources["ArtworkGridItemStyle"]
         };
         ScrollViewer.SetVerticalScrollBarVisibility(grid, ScrollBarVisibility.Disabled);
         ScrollViewer.SetVerticalScrollMode(grid, ScrollMode.Disabled);
@@ -275,7 +290,7 @@ public sealed partial class MainWindow : Window
             var card = Button(body, () => OpenGameAsync(game));
             card.Padding = new Thickness(0);
             card.Margin = new Thickness(0, 0, 12, 12);
-            card.CornerRadius = new CornerRadius(10);
+            card.CornerRadius = Rounded;
             card.Background = Surface;
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(card, $"{game.Title} – Details öffnen");
             grid.Items.Add(card);
@@ -402,7 +417,7 @@ public sealed partial class MainWindow : Window
         PageHost.Children.Add(ProfileHeader(ProfileAvatar(), showEditButton: true));
         if (!string.IsNullOrWhiteSpace(state.Profile.Bio))
             PageHost.Children.Add(Panel(Text(state.Profile.Bio, 15)));
-        var stats = new Grid { ColumnSpacing = 12, RowSpacing = 12 };
+        var stats = new Grid { ColumnSpacing = 12 };
         for (var i = 0; i < 3; i++)
         {
             stats.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -419,6 +434,7 @@ public sealed partial class MainWindow : Window
                 Grid.SetColumn(child, width < 620 ? 0 : i);
                 Grid.SetRow(child, width < 620 ? i : 0);
                 Grid.SetColumnSpan(child, width < 620 ? 3 : 1);
+                child.Margin = new Thickness(0, 0, 0, width < 620 && i < stats.Children.Count - 1 ? 12 : 0);
             }
         }
         ArrangeStats(0);
@@ -466,7 +482,7 @@ public sealed partial class MainWindow : Window
 
     private Border ProfileHeader(PersonPicture avatar, bool showEditButton)
     {
-        var identity = new Grid { ColumnSpacing = 20, RowSpacing = 16 };
+        var identity = new Grid { ColumnSpacing = 16 };
         identity.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         identity.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         identity.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -493,16 +509,11 @@ public sealed partial class MainWindow : Window
                 Grid.SetColumn(edit, stacked ? 0 : 2);
                 Grid.SetRow(edit, stacked ? 1 : 0);
                 Grid.SetColumnSpan(edit, stacked ? 3 : 1);
+                edit.Margin = new Thickness(0, stacked ? 12 : 0, 0, 0);
             };
         }
         var header = Panel(identity);
-        var background = new LinearGradientBrush
-        {
-            StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(1, 1)
-        };
-        background.GradientStops.Add(new GradientStop { Offset = 0, Color = Color.FromArgb(210, 77, 11, 32) });
-        background.GradientStops.Add(new GradientStop { Offset = 1, Color = Color.FromArgb(180, 35, 3, 14) });
-        header.Background = background;
+        header.Background = Gradient();
         return header;
     }
 
@@ -744,6 +755,7 @@ public sealed partial class MainWindow : Window
         dialog.RequestedTheme = ElementTheme.Dark;
         dialog.Background = (Brush)Application.Current.Resources["LauncherDialogBrush"];
         dialog.BorderBrush = SurfaceBorder;
+        dialog.CornerRadius = Rounded;
         dialog.Resources.ThemeDictionaries["Dark"] = new ResourceDictionary
         {
             ["ContentDialogTopOverlay"] = Surface,
@@ -789,18 +801,28 @@ public sealed partial class MainWindow : Window
     private void ShowError(Exception exception)
     {
         LocalServices.Log(exception);
-        Notice.Title = "Aktion fehlgeschlagen";
-        Notice.Message = exception.Message;
-        Notice.Severity = InfoBarSeverity.Error;
-        Notice.IsOpen = true;
+        ShowNotice("Aktion fehlgeschlagen", exception.Message, InfoBarSeverity.Error);
     }
 
-    private void Notify(string title, string message)
+    private void Notify(string title, string message) => ShowNotice(title, message, InfoBarSeverity.Success);
+
+    private void ShowNotice(string title, string message, InfoBarSeverity severity)
     {
+        if (Notice.IsOpen && Notice.Title == title && Notice.Message == message && Notice.Severity == severity)
+            return;
+        noticeTimer.Stop();
         Notice.Title = title;
         Notice.Message = message;
-        Notice.Severity = InfoBarSeverity.Success;
+        Notice.Severity = severity;
         Notice.IsOpen = true;
+        noticeTimer.Interval = TimeSpan.FromSeconds(severity switch
+        {
+            InfoBarSeverity.Success => 4,
+            InfoBarSeverity.Warning => 7,
+            InfoBarSeverity.Error => 9,
+            _ => 5
+        });
+        noticeTimer.Start();
     }
 
     private async void OnClosing(AppWindow sender, AppWindowClosingEventArgs args)
@@ -815,6 +837,7 @@ public sealed partial class MainWindow : Window
         closing = true;
         CancelOnlineRequest();
         timer.Stop();
+        noticeTimer.Stop();
         Root.IsHitTestVisible = false;
         await RunAsync(tracker.StopAsync);
         http.Dispose();
@@ -823,8 +846,8 @@ public sealed partial class MainWindow : Window
 
     private Button Button(object content, Func<Task> action, bool primary = false)
     {
-        var button = new Button { Content = content, Padding = new Thickness(16, 10, 16, 10),
-            VerticalAlignment = VerticalAlignment.Center };
+        var button = new Button { Content = content, Padding = new Thickness(14, 8, 14, 8),
+            CornerRadius = Rounded, VerticalAlignment = VerticalAlignment.Center };
         if (primary)
         {
             button.Background = (SolidColorBrush)Application.Current.Resources["LauncherActionBrush"];
@@ -839,12 +862,12 @@ public sealed partial class MainWindow : Window
         return button;
     }
 
-    private static StackPanel Row() => new() { Orientation = Orientation.Horizontal, Spacing = 18 };
+    private static StackPanel Row() => new() { Orientation = Orientation.Horizontal, Spacing = 12 };
 
     private static TextBlock Text(string text, double size = 14, Brush? foreground = null) => new()
     {
         Text = text, FontSize = size, TextWrapping = TextWrapping.Wrap,
-        Foreground = foreground ?? Brush(239, 243, 249),
+        Foreground = foreground ?? Brush(255, 241, 242),
         FontWeight = size >= 20 ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
         VerticalAlignment = VerticalAlignment.Center
     };
@@ -868,8 +891,8 @@ public sealed partial class MainWindow : Window
     {
         Background = Surface,
         BorderBrush = SurfaceBorder,
-        BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12),
-        Padding = new Thickness(24), Child = child
+        BorderThickness = new Thickness(1), CornerRadius = Rounded,
+        Padding = new Thickness(20), Child = child
     };
 
     private static Border Stat(string value, string label)
@@ -891,10 +914,9 @@ public sealed partial class MainWindow : Window
     private void ImageFailed(object sender, ExceptionRoutedEventArgs args)
     {
         if (sender is Image image) image.Visibility = Visibility.Collapsed;
-        Notice.Title = "Cover nicht verfügbar";
-        Notice.Message = "Mindestens ein Cover konnte nicht geladen werden. Die Genre-Grafik wird stattdessen angezeigt.";
-        Notice.Severity = InfoBarSeverity.Warning;
-        Notice.IsOpen = true;
+        ShowNotice("Cover nicht verfügbar",
+            "Mindestens ein Cover konnte nicht geladen werden. Die Genre-Grafik wird stattdessen angezeigt.",
+            InfoBarSeverity.Warning);
     }
 
     private Border Cover(Game game, double width, double height, string? imageUrl = null, bool fallbackToCover = false)
@@ -925,15 +947,18 @@ public sealed partial class MainWindow : Window
             };
             grid.Children.Add(image);
         }
-        return new Border { CornerRadius = new CornerRadius(9), Child = grid };
+        return new Border { CornerRadius = Rounded, Child = grid };
     }
 
     private static LinearGradientBrush Gradient()
     {
-        var color = Color.FromArgb(255, 77, 11, 32);
+        var color = ((SolidColorBrush)Application.Current.Resources["LauncherSurfaceTint"]).Color;
+        color.A = 255;
+        var end = ((SolidColorBrush)Application.Current.Resources["LauncherLibrarySidebarBrush"]).Color;
+        end.A = 255;
         var brush = new LinearGradientBrush { StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(1, 1) };
         brush.GradientStops.Add(new GradientStop { Color = color, Offset = 0 });
-        brush.GradientStops.Add(new GradientStop { Color = Color.FromArgb(255, 35, 3, 14), Offset = 1 });
+        brush.GradientStops.Add(new GradientStop { Color = end, Offset = 1 });
         return brush;
     }
 

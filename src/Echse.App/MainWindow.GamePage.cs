@@ -152,7 +152,7 @@ public sealed partial class MainWindow
 
     private static Grid TwoColumns(FrameworkElement main, FrameworkElement aside)
     {
-        var grid = new Grid { ColumnSpacing = 22, RowSpacing = 18 };
+        var grid = new Grid { ColumnSpacing = 16 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(320) });
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -160,13 +160,16 @@ public sealed partial class MainWindow
         Grid.SetColumn(aside, 1);
         grid.Children.Add(main);
         grid.Children.Add(aside);
-        grid.SizeChanged += (_, args) =>
+        void Arrange(double width)
         {
-            var stacked = args.NewSize.Width < 820;
+            var stacked = width < 820;
             grid.ColumnDefinitions[1].Width = new GridLength(stacked ? 0 : 320);
             Grid.SetColumn(aside, stacked ? 0 : 1);
             Grid.SetRow(aside, stacked ? 1 : 0);
-        };
+            aside.Margin = new Thickness(0, stacked ? 16 : 0, 0, 0);
+        }
+        Arrange(0);
+        grid.SizeChanged += (_, args) => Arrange(args.NewSize.Width);
         return grid;
     }
 
@@ -179,7 +182,7 @@ public sealed partial class MainWindow
         var gallery = new StackPanel { Spacing = 10 };
         var preview = new Image { Stretch = Stretch.Uniform };
         preview.ImageFailed += ImageFailed;
-        var frame = new Grid { Height = 340, Background = Surface, CornerRadius = new CornerRadius(8) };
+        var frame = new Grid { Height = 340, Background = Surface, CornerRadius = Rounded };
         frame.Children.Add(preview);
         frame.SizeChanged += (_, args) => frame.Height = Math.Clamp(args.NewSize.Width * 9 / 16, 160, 520);
         var open = Button(frame, () =>
