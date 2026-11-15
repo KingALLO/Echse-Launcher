@@ -4,11 +4,16 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="Echse Launcher">
     <Grid x:Name="Root" Background="{ThemeResource LauncherSurfaceTint}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="36"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <Grid x:Name="TitleBar" Background="{ThemeResource LauncherLibrarySidebarBrush}">
+        <Grid x:Name="TitleBar" Grid.ColumnSpan="2" Background="{ThemeResource LauncherLibrarySidebarBrush}">
             <StackPanel Orientation="Horizontal" Spacing="10" Margin="20,0" VerticalAlignment="Center">
                 <Viewbox Width="25" Height="25" AutomationProperties.Name="Eidechse">
                     <Canvas Width="64" Height="64">
@@ -17,8 +22,8 @@
                         <Ellipse Canvas.Left="51" Canvas.Top="10" Width="4" Height="4" Fill="#1C1C1C"/>
                     </Canvas>
                 </Viewbox>
-                <TextBlock Text="ECHSE" FontWeight="SemiBold" CharacterSpacing="180" FontSize="12"/>
-                <TextBlock Text="LAUNCHER" Opacity="0.45" CharacterSpacing="120" FontSize="11" VerticalAlignment="Center"/>
+                <TextBlock Text="ECHSE" Foreground="{ThemeResource LauncherTextBrush}" FontWeight="SemiBold" CharacterSpacing="180" FontSize="12"/>
+                <TextBlock Text="LAUNCHER" Foreground="{ThemeResource LauncherTextBrush}" Opacity="0.45" CharacterSpacing="120" FontSize="11" VerticalAlignment="Center"/>
             </StackPanel>
         </Grid>
         <NavigationView x:Name="Navigation" Grid.Row="1"
@@ -32,10 +37,10 @@
                         <ResourceDictionary x:Key="Dark">
                             <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="Transparent"/>
                             <SolidColorBrush x:Key="NavigationViewExpandedPaneBackground" Color="Transparent"/>
-                            <SolidColorBrush x:Key="NavigationViewTopPaneBackground" Color="#F2201314"/>
+                            <SolidColorBrush x:Key="NavigationViewTopPaneBackground" Color="#61101114"/>
                             <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent"/>
                             <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent"/>
-                            <SolidColorBrush x:Key="NavigationViewSelectionIndicatorForeground" Color="#FF9592"/>
+                            <SolidColorBrush x:Key="NavigationViewSelectionIndicatorForeground" Color="#FF4B55"/>
                         </ResourceDictionary>
                         <ResourceDictionary x:Key="HighContrast">
                             <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="{ThemeResource SystemColorWindowColor}"/>
@@ -53,14 +58,14 @@
                 <NavigationViewItem Content="Downloads" Tag="downloads" Icon="Download"/>
                 <NavigationViewItem Content="Mein Profil" Tag="profile" Icon="Contact"/>
             </NavigationView.MenuItems>
-            <Grid Padding="12">
+            <Grid x:Name="ContentShell" Padding="12">
                 <Grid x:Name="PageLayout">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition x:Name="SidebarColumn" Width="220"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <Grid x:Name="LibrarySidebar" Padding="10"
-                          CornerRadius="{StaticResource LauncherCornerRadius}"
+                          CornerRadius="{Binding Corners, Source={StaticResource LauncherThemeMetrics}}"
                           Background="{ThemeResource LauncherLibrarySidebarBrush}" Visibility="Collapsed" RowSpacing="10">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -72,7 +77,7 @@
                                 Click="LibraryHome_Click" AutomationProperties.Name="Bibliotheksübersicht">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon Glyph="&#xE80F;" FontSize="16"/>
-                                <TextBlock Text="Bibliothek" FontSize="13"/>
+                                <TextBlock Text="Bibliothek" FontSize="13" Foreground="{ThemeResource LauncherTextBrush}"/>
                             </StackPanel>
                         </Button>
                         <TextBox x:Name="LibrarySearch" Grid.Row="1" PlaceholderText="Spiele suchen"
@@ -102,6 +107,7 @@
                                                    ImageFailed="ImageFailed"/>
                                         </Grid>
                                         <TextBlock Grid.Column="1" Text="{Binding Game.Title}" FontSize="12"
+                                                   Foreground="{ThemeResource LauncherTextBrush}"
                                                    TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                                     </Grid>
                                 </DataTemplate>
@@ -109,7 +115,7 @@
                         </ListView>
                     </Grid>
                     <Grid x:Name="CatalogSidebar" Padding="8" Visibility="Collapsed"
-                          CornerRadius="{StaticResource LauncherCornerRadius}"
+                          CornerRadius="{Binding Corners, Source={StaticResource LauncherThemeMetrics}}"
                           Background="{ThemeResource LauncherLibrarySidebarBrush}">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -149,7 +155,7 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="ImageViewerTitle" FontSize="18" FontWeight="SemiBold"
+                <TextBlock x:Name="ImageViewerTitle" FontSize="18" FontWeight="SemiBold" Foreground="{ThemeResource LauncherTextBrush}"
                            TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                 <Button x:Name="CloseImageButton" Grid.Column="1" Content="Schließen · Esc"
                         Click="CloseImage_Click"/>
@@ -163,7 +169,7 @@
                     <ProgressRing x:Name="ImageLoading" IsActive="False" Width="40" Height="40"/>
                     <Image x:Name="FullImage" Stretch="Uniform"
                            ImageOpened="FullImage_Opened" ImageFailed="FullImage_Failed"/>
-                    <TextBlock x:Name="ImageViewerError" Visibility="Collapsed" TextWrapping="Wrap"
+                    <TextBlock x:Name="ImageViewerError" Visibility="Collapsed" TextWrapping="Wrap" Foreground="{ThemeResource LauncherTextBrush}"
                                HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440"
                                Text="Das Bild konnte nicht geladen werden. Prüfe deine Internetverbindung oder wähle ein anderes Bild."/>
                 </Grid>
@@ -186,7 +192,7 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="← / →  Bild wechseln" Opacity="0.6" VerticalAlignment="Center"/>
+                <TextBlock Text="← / →  Bild wechseln" Foreground="{ThemeResource LauncherTextBrush}" Opacity="0.6" VerticalAlignment="Center"/>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
                     <Button Content="−" AutomationProperties.Name="Bild verkleinern" Click="ZoomOut_Click"/>
                     <Button Content="Einpassen" Click="FitImage_Click"/>
@@ -196,8 +202,11 @@
         </Grid>
         <InfoBar x:Name="Notice" Grid.Row="1" IsOpen="False" IsClosable="True"
                  HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="16"
-                 MaxWidth="420" CornerRadius="{StaticResource LauncherCornerRadius}"
+                 MaxWidth="420" CornerRadius="{Binding Corners, Source={StaticResource LauncherThemeMetrics}}"
                  Background="{ThemeResource LauncherDialogBrush}"
                  BorderBrush="{ThemeResource LauncherBorderBrush}" BorderThickness="1"/>
+        <Border x:Name="ThemePreviewPane" Grid.Row="1" Grid.Column="1" Visibility="Collapsed"
+                Width="360" Margin="0,8,8,8" Padding="16" CornerRadius="10"
+                Background="#FF202024" BorderBrush="#FF66666E" BorderThickness="1"/>
     </Grid>
 </Window>

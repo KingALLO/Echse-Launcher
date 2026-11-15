@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Echse.Core;
 
@@ -101,11 +102,37 @@ public sealed class SteamCatalogService(HttpClient client)
     public static string PortraitUrl(int appId) =>
         $"https://cdn.akamai.steamstatic.com/steam/apps/{appId}/library_600x900.jpg";
 
-    private async Task<JsonDocument> GetJsonAsync(string route, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<GameNews>> GetNewsAsync(int appId, CancellationToken cancellationToken = default)
     {
-        using var response = await client.GetAsync(Store + route, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (appId <= 0) throw new ArgumentOutOfRangeException(nameof(appId));
+        using var document = await GetJsonAsync(
+            $"ISteamNews/GetNewsForApp/v2/?appid={appId}&count=5&maxlength=600&feeds=steam_community_announcements",
+            cancellationToken, "https://api.steampowered.com/");
+        var news = document.RootElement.GetProperty("appnews");
+        if (news.GetProperty("appid").GetInt32() != appId)
+            throw new InvalidDataException("Steam lieferte Neuigkeiten für ein anderes Spiel.");
+        return RequiredArray(news, "newsitems").EnumerateArray().Take(5).Select(item =>
+        {
+            var title = PlainText(String(item, "title"));
+            if (string.IsNullOrWhiteSpace(title))
+                throw new InvalidDataException("Steam lieferte einen Beitrag ohne Titel.");
+            var contents = Regex.Replace(String(item, "contents"),
+                @"\[(?:img|previewyoutube|video)[^\]]*\].*?\[/(?:img|previewyoutube|video)\]", "",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline, TimeSpan.FromSeconds(1));
+            contents = Regex.Replace(contents, @"\[[^\]\r\n]{1,200}\]", "",
+                RegexOptions.None, TimeSpan.FromSeconds(1));
+            return new GameNews(title, PlainText(contents), NetworkAddress.Parse(String(item, "url")),
+                DateTimeOffset.FromUnixTimeSeconds(item.GetProperty("date").GetInt64()));
+        }).OrderByDescending(item => item.PublishedAt).ToList();
+    }
+
+    private async Task<JsonDocument> GetJsonAsync(string route, CancellationToken cancellationToken,
+        string baseAddress = Store)
+    {
+        using var response = await client.GetAsync(baseAddress + route, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
-            throw new HttpRequestException("Steam begrenzt gerade die Anfragen. Bitte versuche es in einigen Minuten erneut.");
+            throw new HttpRequestException("Steam begrenzt gerade die Anfragen. Bitte versuche es in einigen Minuten erneut.",
+                null, HttpStatusCode.TooManyRequests);
         response.EnsureSuccessStatusCode();
         const int limit = 8 * 1024 * 1024;
         if (response.Content.Headers.ContentLength > limit)

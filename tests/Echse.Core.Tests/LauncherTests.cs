@@ -95,6 +95,14 @@ public sealed class LauncherTests
         Assert.Throws<ArgumentException>(() => MagnetLink.Validate(magnet));
 
     [Fact]
+    public void NormalizesHexAndBase32MagnetHashesToTheSameValue()
+    {
+        var base32 = "magnet:?xt=urn:btih:aerukz4jvpg66ajdivtytk6n54asgrlh";
+        Assert.Equal("0123456789ABCDEF0123456789ABCDEF01234567", MagnetLink.GetInfoHash(Magnet));
+        Assert.Equal(MagnetLink.GetInfoHash(Magnet), MagnetLink.GetInfoHash(base32));
+    }
+
+    [Fact]
     public async Task CatalogValidatesShapeDuplicateIdsAndSize()
     {
         using var valid = new HttpClient(new StubHandler((_, _) => Task.FromResult(Json(

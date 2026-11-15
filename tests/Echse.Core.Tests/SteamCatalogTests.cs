@@ -8,6 +8,41 @@ namespace Echse.Core.Tests;
 public sealed class SteamCatalogTests
 {
     [Fact]
+    public async Task NewsUsesOfficialFeedAndCleansMarkupWithoutInventingUpdates()
+    {
+        using var handler = new Handler((request, _) =>
+        {
+            Assert.Equal("api.steampowered.com", request.RequestUri!.Host);
+            Assert.Contains("appid=620", request.RequestUri.Query);
+            Assert.Contains("feeds=steam_community_announcements", request.RequestUri.Query);
+            return Task.FromResult(Json("""
+                {"appnews":{"appid":620,"newsitems":[
+                  {"title":"Update &amp; Fixes","contents":"[p]<b>Hallo</b> [url=https://example.org]Welt[/url][/p][img]https://cdn.example/banner.jpg[/img]<script>hidden()</script>",
+                   "url":"https://store.steampowered.com/news/app/620/view/1","date":1700000000}]}}
+                """));
+        });
+        using var client = new HttpClient(handler);
+        var news = Assert.Single(await new SteamCatalogService(client).GetNewsAsync(620));
+        Assert.Equal("Update & Fixes", news.Title);
+        Assert.Equal("Hallo Welt", news.Summary);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1700000000), news.PublishedAt);
+    }
+
+    [Fact]
+    public async Task NewsDistinguishesNoAnnouncementsFromWrongAppAndUnsafeLinks()
+    {
+        using var empty = Client("""{"appnews":{"appid":620,"newsitems":[]}}""");
+        Assert.Empty(await new SteamCatalogService(empty).GetNewsAsync(620));
+        using var wrong = Client("""{"appnews":{"appid":400,"newsitems":[]}}""");
+        await Assert.ThrowsAsync<InvalidDataException>(() => new SteamCatalogService(wrong).GetNewsAsync(620));
+        using var unsafeLink = Client("""
+            {"appnews":{"appid":620,"newsitems":[{"title":"Update","contents":"Text",
+            "url":"file:///C:/test.exe","date":1700000000}]}}
+            """);
+        await Assert.ThrowsAsync<ArgumentException>(() => new SteamCatalogService(unsafeLink).GetNewsAsync(620));
+    }
+
+    [Fact]
     public async Task ArtworkSearchMatchesUniqueNormalizedTitleAndReturnsPortraitSource()
     {
         using var client = Client("""
@@ -228,6 +263,7 @@ public sealed class SteamCatalogTests
             await repository.UpdateAsync(state =>
             {
                 state.Library[0].Game = state.Library[0].Game with { PortraitUrl = "https://cdn.example/portrait.jpg" };
+                state.Library[0].InstallationDirectory = Path.Combine(folder, "installation");
                 state.SteamCatalog = new SteamCatalogSnapshot
                 {
                     Popular = [new Game { Id = "steam:620", Title = "Portal", SteamAppId = 620 }]
@@ -244,6 +280,7 @@ public sealed class SteamCatalogTests
             Assert.Equal(1234, Assert.Single(result.Library).PlaySeconds);
             Assert.Equal("https://cdn.example/portrait.jpg", Assert.Single(result.Library).Game.PortraitUrl);
             Assert.Null(Assert.Single(result.Library).Game.SteamAppId);
+            Assert.Equal(Path.Combine(folder, "installation"), Assert.Single(result.Library).InstallationDirectory);
             Assert.Equal(620, Assert.Single(result.SteamCatalog!.Popular).SteamAppId);
             Assert.Single(Assert.Single(result.SteamDetails).Screenshots);
             Assert.Equal("RAM: 8 GB", Assert.Single(Assert.Single(result.SteamDetails).Requirements).Minimum);

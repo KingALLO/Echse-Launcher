@@ -28,6 +28,13 @@ public sealed partial class MainWindow
         {
             gameDetailsLoading = false;
             page = gameOriginPage;
+            if (page == "library-game")
+            {
+                var current = await repository.ReadAsync();
+                selectedGame = current.Library.FirstOrDefault(entry => entry.Game.Id == libraryReturnGameId)?.Game;
+                if (selectedGame is null) page = "library";
+            }
+            SelectNavigation(page is "library-game" or "library" ? "library" : "store");
             await RenderAsync();
         }));
         navigation.Children.Add(Eyebrow(game.SteamAppId is null ? "DEIN SPIEL" : $"STEAM  /  APP {game.SteamAppId}"));
@@ -103,6 +110,9 @@ public sealed partial class MainWindow
                 : "Öffentlicher Ab-Preis wird abgerufen …", 14, Muted));
             PageHost.Children.Add(TwoColumns(Panel(purchase), Panel(keyPriceHost)));
         }
+        sourceGameHost = new StackPanel();
+        RenderSourceGameContent(game);
+        PageHost.Children.Add(Panel(sourceGameHost));
         if (!gameDetailsLoading)
         {
             var actions = new StackPanel { Spacing = 12 };
@@ -182,7 +192,7 @@ public sealed partial class MainWindow
         var gallery = new StackPanel { Spacing = 10 };
         var preview = new Image { Stretch = Stretch.Uniform };
         preview.ImageFailed += ImageFailed;
-        var frame = new Grid { Height = 340, Background = Surface, CornerRadius = Rounded };
+        var frame = ThemeCorners(new Grid { Height = 340, Background = Surface });
         frame.Children.Add(preview);
         frame.SizeChanged += (_, args) => frame.Height = Math.Clamp(args.NewSize.Width * 9 / 16, 160, 520);
         var open = Button(frame, () =>

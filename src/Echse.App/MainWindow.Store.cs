@@ -259,6 +259,7 @@ public sealed partial class MainWindow
     private async Task OpenGameAsync(Game game)
     {
         var previousVersion = renderVersion;
+        if (page == "library-game") libraryReturnGameId = selectedGame?.Id;
         if (page != "game") gameOriginPage = page;
         await repository.UpdateAsync(current =>
             current.Views[game.Id] = Math.Min(1_000_000, current.Views.GetValueOrDefault(game.Id) + 1));
@@ -266,11 +267,16 @@ public sealed partial class MainWindow
         state = await repository.ReadAsync();
         selectedGame = state.SteamDetails.FirstOrDefault(detail => detail.Id == game.Id) ?? game;
         selectedGalleryIndex = 0;
+        SelectNavigation("store");
         gameDetailsError = null;
         gameDetailsLoading = game.SteamAppId is not null;
         page = "game";
         await RenderAsync();
-        if (game.SteamAppId is not int id) return;
+        if (closing || page != "game" || selectedGame?.Id != game.Id) return;
+        var sourceGame = selectedGame;
+        _ = RunAsync(() => EnsureSourceSearchAsync(sourceGame));
+        if (game.SteamAppId is not int id)
+            return;
         var token = BeginOnlineRequest();
         var version = renderVersion;
         try
@@ -296,6 +302,7 @@ public sealed partial class MainWindow
             if (token.IsCancellationRequested || version != renderVersion || closing) return;
             selectedGame = details;
             gameDetailsLoading = false;
+            _ = RunAsync(() => EnsureSourceSearchAsync(details));
             await RenderAsync();
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }

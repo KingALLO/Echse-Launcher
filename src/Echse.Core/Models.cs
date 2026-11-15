@@ -38,6 +38,7 @@ public sealed class LibraryEntry
 {
     public Game Game { get; set; } = new();
     public string? ExecutablePath { get; set; }
+    public string? InstallationDirectory { get; set; }
     public double PlaySeconds { get; set; }
     public DateTimeOffset? LastPlayed { get; set; }
     public int LaunchCount { get; set; }
@@ -58,6 +59,7 @@ public sealed class ConnectionSettings
     public string QBitUrl { get; set; } = "http://localhost:8080";
     public string QBitUsername { get; set; } = "";
     public string? ProtectedPassword { get; set; }
+    public List<string> SourceUrls { get; set; } = [];
 }
 
 public sealed class LauncherState
@@ -86,3 +88,5 @@ public sealed record SteamCatalogSnapshot
 }
 
 public sealed record TorrentStatus(string Name, double Progress, string State, long DownloadSpeed);
+
+public sealed record GameNews(string Title, string Summary, Uri Url, DateTimeOffset PublishedAt);

@@ -75,18 +75,38 @@ public static class NetworkAddress
 
 public static class MagnetLink
 {
-    public static void Validate(string value)
+    public static void Validate(string value) => _ = GetInfoHash(value);
+
+    public static string GetInfoHash(string value)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme != "magnet")
             throw new ArgumentException("Es wird ein gültiger Magnet-Link benötigt.");
-        var topics = uri.Query.TrimStart('?').Split('&')
+        var hash = uri.Query.TrimStart('?').Split('&')
             .Select(part => part.Split('=', 2))
             .Where(pair => pair.Length == 2 && pair[0].Equals("xt", StringComparison.OrdinalIgnoreCase))
-            .Select(pair => Uri.UnescapeDataString(pair[1]));
-        if (!topics.Any(topic =>
-            topic.StartsWith("urn:btih:", StringComparison.OrdinalIgnoreCase) &&
-            IsHash(topic[9..])))
+            .Select(pair => Uri.UnescapeDataString(pair[1]))
+            .Where(topic => topic.StartsWith("urn:btih:", StringComparison.OrdinalIgnoreCase))
+            .Select(topic => topic[9..])
+            .FirstOrDefault(IsHash);
+        if (hash is null)
             throw new ArgumentException("Der Magnet-Link benötigt einen gültigen BitTorrent-v1-Infohash (btih).");
+        if (hash.Length == 40) return hash.ToUpperInvariant();
+
+        Span<byte> bytes = stackalloc byte[20];
+        var buffer = 0;
+        var bits = 0;
+        var index = 0;
+        foreach (var character in hash)
+        {
+            var upper = char.ToUpperInvariant(character);
+            buffer = (buffer << 5) | (upper >= 'A' && upper <= 'Z' ? upper - 'A' : upper - '2' + 26);
+            bits += 5;
+            if (bits < 8) continue;
+            bits -= 8;
+            bytes[index++] = (byte)(buffer >> bits);
+            buffer &= (1 << bits) - 1;
+        }
+        return Convert.ToHexString(bytes);
     }
 
     private static bool IsHash(string hash) =>

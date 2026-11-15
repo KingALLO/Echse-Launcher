@@ -12,14 +12,14 @@ public sealed partial class MainWindow
     private int librarySort = 2;
     private Action? refreshLibrary;
     private TextBox? libraryInlineSearch;
-    private bool ShowingLibrary => page == "library" || page == "game" && gameOriginPage == "library";
+    private bool ShowingLibrary => page is "library" or "library-game";
 
     private void UpdateLibrarySidebar()
     {
         var entries = state.Library.Where(entry => Matches(entry.Game, libraryQuery.Trim()))
             .OrderBy(entry => entry.Game.Title, StringComparer.CurrentCultureIgnoreCase).ToList();
         LibraryGameList.ItemsSource = entries;
-        LibraryGameList.SelectedItem = page == "game"
+        LibraryGameList.SelectedItem = page == "library-game"
             ? entries.FirstOrDefault(entry => entry.Game.Id == selectedGame?.Id) : null;
     }
 
@@ -45,7 +45,7 @@ public sealed partial class MainWindow
 
     private async void LibraryGameList_ItemClick(object sender, ItemClickEventArgs args)
     {
-        if (args.ClickedItem is LibraryEntry entry) await RunAsync(() => OpenGameAsync(entry.Game));
+        if (args.ClickedItem is LibraryEntry entry) await RunAsync(() => OpenLibraryGameAsync(entry.Game));
     }
 
     private void LibraryGameList_ContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
@@ -195,7 +195,7 @@ public sealed partial class MainWindow
         var game = entry.Game;
         var portrait = game.PortraitUrl ?? (game.SteamAppId is int id ? SteamCatalogService.PortraitUrl(id) : null);
         var art = Cover(game, 112, 168, portrait, fallbackToCover: true);
-        var body = new Grid { Width = 112, Height = 168, CornerRadius = Rounded };
+        var body = ThemeCorners(new Grid { Width = 112, Height = 168 });
         body.Children.Add(art);
         if (portrait is null && string.IsNullOrWhiteSpace(game.CoverUrl))
         {
@@ -227,7 +227,7 @@ public sealed partial class MainWindow
         var game = entry.Game;
         var body = new StackPanel { Width = 234 };
         var cover = Cover(game, 234, 110, game.BannerUrl ?? game.CoverUrl);
-        cover.CornerRadius = new CornerRadius(Rounded.TopLeft, Rounded.TopRight, 0, 0);
+        ThemeCorners(cover, true);
         body.Children.Add(LibraryCardButton(cover, game));
         var footer = new Grid { Height = 58, Padding = new Thickness(6), ColumnSpacing = 8 };
         footer.Background = (Brush)Application.Current.Resources["LauncherLibraryOverlayBrush"];
@@ -244,8 +244,8 @@ public sealed partial class MainWindow
         play.Height = 40;
         play.Padding = new Thickness(0);
         play.Background = (Brush)Application.Current.Resources["LauncherActionBrush"];
-        play.Foreground = Brush(255, 255, 255);
-        play.IsEnabled = !running && !string.IsNullOrWhiteSpace(entry.ExecutablePath);
+        play.Foreground = OnAction;
+        play.IsEnabled = !running && GameInstallation.IsInstalled(entry);
         AutomationProperties.SetName(play, game.Title + " starten");
         ToolTipService.SetToolTip(play, running ? "Spiel läuft bereits" :
             play.IsEnabled ? "Spiel starten" : "Zum Starten in den Spieldetails eine EXE auswählen");
@@ -263,12 +263,12 @@ public sealed partial class MainWindow
         Grid.SetColumn(info, 1);
         footer.Children.Add(info);
         body.Children.Add(footer);
-        return new Border { Child = body, CornerRadius = Rounded };
+        return ThemeCorners(new Border { Child = body });
     }
 
     private Button LibraryCardButton(UIElement content, Game game)
     {
-        var button = Button(content, () => OpenGameAsync(game));
+        var button = Button(content, () => OpenLibraryGameAsync(game));
         button.Padding = new Thickness(0);
         button.BorderThickness = new Thickness(0);
         button.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));

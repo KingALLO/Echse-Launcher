@@ -29,6 +29,7 @@ public sealed class StateRepository(string directory)
                 (loaded.SteamCatalog is { } steam &&
                     (steam.Popular is null || steam.NewReleases is null || steam.Specials is null || steam.Upcoming is null)))
                 throw new InvalidDataException("Die gespeicherten Launcher-Daten haben ein ungültiges Format.");
+            loaded.Settings.SourceUrls = loaded.Settings.SourceUrls?.Where(url => !string.IsNullOrWhiteSpace(url)).ToList() ?? [];
             state = loaded;
         }
         finally { gate.Release(); }

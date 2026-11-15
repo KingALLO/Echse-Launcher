@@ -22,52 +22,64 @@
             </Style>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Dark">
-                    <SolidColorBrush x:Key="LauncherSurfaceTint" Color="#E672232D"/>
-                    <Color x:Key="SystemAccentColor">#B54548</Color>
-                    <Color x:Key="SystemAccentColorLight1">#E5484D</Color>
-                    <Color x:Key="SystemAccentColorLight2">#FF9592</Color>
-                    <Color x:Key="SystemAccentColorLight3">#FFD1D9</Color>
-                    <SolidColorBrush x:Key="LauncherAccentBrush" Color="#FF9592"/>
-                    <SolidColorBrush x:Key="LauncherActionBrush" Color="#B54548"/>
-                    <SolidColorBrush x:Key="LauncherActionHoverBrush" Color="#C44C50"/>
-                    <SolidColorBrush x:Key="LauncherActionPressedBrush" Color="#8C333A"/>
-                    <SolidColorBrush x:Key="LauncherLibrarySidebarBrush" Color="#F2201314"/>
-                    <SolidColorBrush x:Key="LauncherLibraryOverlayBrush" Color="#EB201314"/>
-                    <SolidColorBrush x:Key="LauncherPanelBrush" Color="#E6611623"/>
-                    <SolidColorBrush x:Key="LauncherBorderBrush" Color="#8C333A"/>
-                    <SolidColorBrush x:Key="LauncherMutedBrush" Color="#FFD1D9"/>
-                    <SolidColorBrush x:Key="LauncherDialogBrush" Color="#FF3B1219"/>
-                    <SolidColorBrush x:Key="ControlFillColorDefaultBrush" Color="#B3500F1C"/>
-                    <SolidColorBrush x:Key="ControlFillColorSecondaryBrush" Color="#E6611623"/>
-                    <SolidColorBrush x:Key="ControlFillColorTertiaryBrush" Color="#B33B1219"/>
-                    <SolidColorBrush x:Key="ControlStrokeColorDefaultBrush" Color="#8C333A"/>
-                    <SolidColorBrush x:Key="TextControlBackground" Color="#B33B1219"/>
-                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#E6500F1C"/>
-                    <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#FF3B1219"/>
-                    <SolidColorBrush x:Key="ContentDialogBackground" Color="#FF3B1219"/>
-                    <SolidColorBrush x:Key="SolidBackgroundFillColorBaseBrush" Color="#FF3B1219"/>
-                    <SolidColorBrush x:Key="SolidBackgroundFillColorSecondaryBrush" Color="#FF611623"/>
-                    <SolidColorBrush x:Key="FlyoutPresenterBackground" Color="#FF3B1219"/>
-                    <SolidColorBrush x:Key="ContentDialogTopOverlay" Color="#FF500F1C"/>
-                    <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#FF3B1219"/>
-                    <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#FF3B1219"/>
-                    <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#FF611623"/>
-                    <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#FF72232D"/>
-                    <SolidColorBrush x:Key="AccentButtonBackground" Color="#B54548"/>
-                    <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#C44C50"/>
-                    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#8C333A"/>
+                    <SolidColorBrush x:Key="LauncherSurfaceTint" Color="#3809090B"/>
+                    <SolidColorBrush x:Key="LauncherTextBrush" Color="#F4F4F5"/>
+                    <SolidColorBrush x:Key="LauncherOnActionBrush" Color="White"/>
+                    <LinearGradientBrush x:Key="LauncherGradientBrush" StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#3809090B" Offset="0"/>
+                        <GradientStop Color="#61101114" Offset="1"/>
+                    </LinearGradientBrush>
+                    <Color x:Key="SystemAccentColor">#D51F30</Color>
+                    <Color x:Key="SystemAccentColorLight1">#DA3A49</Color>
+                    <Color x:Key="SystemAccentColorLight2">#FF4B55</Color>
+                    <Color x:Key="SystemAccentColorLight3">#C8C9CF</Color>
+                    <SolidColorBrush x:Key="LauncherAccentBrush" Color="#FF4B55"/>
+                    <SolidColorBrush x:Key="LauncherActionBrush" Color="#EBD51F30"/>
+                    <SolidColorBrush x:Key="LauncherActionHoverBrush" Color="#EBDA3A49"/>
+                    <SolidColorBrush x:Key="LauncherActionPressedBrush" Color="#EBAA1926"/>
+                    <SolidColorBrush x:Key="LauncherLibrarySidebarBrush" Color="#61101114"/>
+                    <SolidColorBrush x:Key="LauncherLibraryOverlayBrush" Color="#61101114"/>
+                    <SolidColorBrush x:Key="LauncherPanelBrush" Color="#57292A2E"/>
+                    <SolidColorBrush x:Key="LauncherBorderBrush" Color="#8C56575E"/>
+                    <SolidColorBrush x:Key="LauncherMutedBrush" Color="#C8C9CF"/>
+                    <SolidColorBrush x:Key="LauncherDialogBrush" Color="#F0202125"/>
+                    <SolidColorBrush x:Key="ControlFillColorDefaultBrush" Color="#4C292A2E"/>
+                    <SolidColorBrush x:Key="ControlFillColorSecondaryBrush" Color="#4C292A2E"/>
+                    <SolidColorBrush x:Key="ControlFillColorTertiaryBrush" Color="#4C292A2E"/>
+                    <SolidColorBrush x:Key="ControlStrokeColorDefaultBrush" Color="#8C56575E"/>
+                    <SolidColorBrush x:Key="TextControlBackground" Color="#4C292A2E"/>
+                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#6B292A2E"/>
+                    <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#80292A2E"/>
+                    <SolidColorBrush x:Key="ContentDialogBackground" Color="#F0202125"/>
+                    <SolidColorBrush x:Key="SolidBackgroundFillColorBaseBrush" Color="#F0202125"/>
+                    <SolidColorBrush x:Key="SolidBackgroundFillColorSecondaryBrush" Color="#F0202125"/>
+                    <SolidColorBrush x:Key="FlyoutPresenterBackground" Color="#F0202125"/>
+                    <SolidColorBrush x:Key="ContentDialogTopOverlay" Color="#F0202125"/>
+                    <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#F0202125"/>
+                    <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="#F0202125"/>
+                    <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="#57292A2E"/>
+                    <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="#75292A2E"/>
+                    <SolidColorBrush x:Key="AccentButtonBackground" Color="#EBD51F30"/>
+                    <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#EBDA3A49"/>
+                    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#EBAA1926"/>
                     <SolidColorBrush x:Key="AccentButtonForeground" Color="White"/>
                     <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="White"/>
                     <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="White"/>
-                    <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#B54548"/>
-                    <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#C44C50"/>
-                    <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#8C333A"/>
-                    <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush" Color="#FF9592"/>
-                    <SolidColorBrush x:Key="AccentTextFillColorSecondaryBrush" Color="#FFD1D9"/>
-                    <SolidColorBrush x:Key="AccentTextFillColorTertiaryBrush" Color="#FFD1D9"/>
+                    <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#EBD51F30"/>
+                    <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#EBDA3A49"/>
+                    <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="#EBAA1926"/>
+                    <SolidColorBrush x:Key="AccentTextFillColorPrimaryBrush" Color="#FF4B55"/>
+                    <SolidColorBrush x:Key="AccentTextFillColorSecondaryBrush" Color="#FF4B55"/>
+                    <SolidColorBrush x:Key="AccentTextFillColorTertiaryBrush" Color="#FF4B55"/>
                     <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="White"/>
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="LauncherTextBrush" Color="{ThemeResource SystemColorWindowTextColor}"/>
+                    <SolidColorBrush x:Key="LauncherOnActionBrush" Color="{ThemeResource SystemColorHighlightTextColor}"/>
+                    <LinearGradientBrush x:Key="LauncherGradientBrush" StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="{ThemeResource SystemColorWindowColor}" Offset="0"/>
+                        <GradientStop Color="{ThemeResource SystemColorWindowColor}" Offset="1"/>
+                    </LinearGradientBrush>
                     <SolidColorBrush x:Key="LauncherSurfaceTint" Color="{ThemeResource SystemColorWindowColor}"/>
                     <SolidColorBrush x:Key="LauncherAccentBrush" Color="{ThemeResource SystemColorHighlightColor}"/>
                     <SolidColorBrush x:Key="LauncherActionBrush" Color="{ThemeResource SystemColorHighlightColor}"/>

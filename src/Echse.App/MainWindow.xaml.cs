@@ -23,6 +23,7 @@ public sealed partial class MainWindow : Window
     private List<Game> catalog = [];
     private string page = "store";
     private bool ready;
+    private bool selectingNavigation;
     private bool closing;
     private bool downloadsLoading;
     private StackPanel? downloadList;
@@ -39,6 +40,7 @@ public sealed partial class MainWindow : Window
 
     public MainWindow()
     {
+        Application.Current.Resources["LauncherThemeMetrics"] = new ThemePreviewMetrics();
         InitializeComponent();
         noticeTimer.Tick += (_, _) =>
         {
@@ -58,8 +60,7 @@ public sealed partial class MainWindow : Window
         InitializeImageViewer();
         tracker = new PlayTracker(repository);
         tracker.Error += exception => DispatcherQueue.TryEnqueue(() => ShowError(exception));
-        SystemBackdrop = Microsoft.UI.Composition.SystemBackdrops.DesktopAcrylicController.IsSupported()
-            ? new NeutralAcrylicBackdrop() : new DesktopAcrylicBackdrop();
+        InitializeThemePreview();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(TitleBar);
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Standard;
@@ -68,6 +69,8 @@ public sealed partial class MainWindow : Window
         {
             if (ready && page == "downloads" && activeDialog is null && !closing)
                 await RunAsync(RefreshDownloadsAsync);
+            else if (ready && page == "library-game" && activeDialog is null && !closing)
+                await RunAsync(RefreshLibraryGameStatusAsync);
         };
     }
 
@@ -123,19 +126,33 @@ public sealed partial class MainWindow : Window
 
     private async void Navigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (!ready || closing) return;
+        if (!ready || closing || selectingNavigation) return;
         page = args.IsSettingsSelected ? "settings" :
             (args.SelectedItemContainer?.Tag as string ?? "store");
         await RunAsync(RenderAsync);
     }
 
+    private void SelectNavigation(string tag)
+    {
+        var item = tag == "settings" ? Navigation.SettingsItem :
+            Navigation.MenuItems.OfType<NavigationViewItem>().Single(item => (string)item.Tag == tag);
+        selectingNavigation = true;
+        try { Navigation.SelectedItem = item; }
+        finally { selectingNavigation = false; }
+    }
+
     private async Task RenderAsync()
     {
         CancelOnlineRequest();
+        CancelSourceSearchOnNavigation();
         renderVersion++;
         state = await repository.ReadAsync();
         refreshLibrary = null;
         libraryInlineSearch = null;
+        refreshLibraryGameStatus = null;
+        libraryNewsHost = null;
+        libraryStorageValue = null;
+        libraryStorageHint = null;
         PageHost.Children.Clear();
         if (ShowingLibrary)
         {
@@ -148,11 +165,19 @@ public sealed partial class MainWindow : Window
         PageScroll.ChangeView(null, 0, null, true);
         downloadList = null;
         downloadUpdated = null;
+        sourceGameHost = null;
         switch (page)
         {
             case "library":
                 RenderLibrary();
                 await RefreshLibraryArtworkAsync();
+                break;
+            case "library-game":
+                RenderLibraryGamePage();
+                if (selectedGame is { } libraryGame)
+                    await Task.WhenAll(RefreshLibraryGameDataAsync(), EnsureSourceSearchAsync(libraryGame));
+                else
+                    await RefreshLibraryGameDataAsync();
                 break;
             case "profile": RenderProfile(); break;
             case "profile-edit": RenderProfileEditor(); break;
@@ -169,12 +194,17 @@ public sealed partial class MainWindow : Window
 
     private void SizePageContent()
     {
+        var libraryGame = page == "library-game";
+        ContentShell.Padding = new Thickness(libraryGame ? 0 : 12);
+        PageHost.Spacing = libraryGame ? 0 : 16;
+        PageScroll.Padding = libraryGame ? new Thickness(0) : new Thickness(0, 4, 4, 4);
+        LibrarySidebar.CornerRadius = libraryGame ? new CornerRadius(0) : Rounded;
         var showLibrarySidebar = ShowingLibrary && PageLayout.ActualWidth >= 760;
         var showCatalogSidebar = !ShowingLibrary && (page is "store" or "game") && PageLayout.ActualWidth >= 900;
         LibrarySidebar.Visibility = showLibrarySidebar ? Visibility.Visible : Visibility.Collapsed;
         CatalogSidebar.Visibility = showCatalogSidebar ? Visibility.Visible : Visibility.Collapsed;
         SidebarColumn.Width = new GridLength(showLibrarySidebar || showCatalogSidebar ? 220 : 0);
-        PageLayout.ColumnSpacing = showLibrarySidebar || showCatalogSidebar ? 16 : 0;
+        PageLayout.ColumnSpacing = !libraryGame && (showLibrarySidebar || showCatalogSidebar) ? 16 : 0;
         if (libraryInlineSearch is not null)
             libraryInlineSearch.Visibility = showLibrarySidebar ? Visibility.Collapsed : Visibility.Visible;
         PageHost.Width = Math.Min(PageHost.MaxWidth,
@@ -254,7 +284,7 @@ public sealed partial class MainWindow : Window
         art.Children.Add(Text("PLAY. EXPLORE. REPEAT.", 10, Accent));
         Grid.SetColumn(art, 1);
         content.Children.Add(art);
-        return new Border { CornerRadius = Rounded, Background = Gradient(), Child = content };
+        return ThemeCorners(new Border { Background = Gradient(), Child = content });
     }
 
     private FrameworkElement GameGrid(IEnumerable<Game> games, bool library = false)
@@ -290,7 +320,7 @@ public sealed partial class MainWindow : Window
             var card = Button(body, () => OpenGameAsync(game));
             card.Padding = new Thickness(0);
             card.Margin = new Thickness(0, 0, 12, 12);
-            card.CornerRadius = Rounded;
+            ThemeCorners(card);
             card.Background = Surface;
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(card, $"{game.Title} – Details öffnen");
             grid.Items.Add(card);
@@ -328,18 +358,9 @@ public sealed partial class MainWindow : Window
                 await RenderAsync();
                 Notify("Spiel gestartet", "Die Spielzeit wird erfasst, solange der Launcher geöffnet bleibt.");
             }, true);
-            play.IsEnabled = !tracker.IsRunning(game.Id) && !string.IsNullOrWhiteSpace(entry.ExecutablePath);
+            play.IsEnabled = !tracker.IsRunning(game.Id) && GameInstallation.IsInstalled(entry);
             actions.Children.Add(play);
-            var executable = Button("EXE auswählen", async () =>
-            {
-                var path = await PickAsync(".exe");
-                if (path is null) return;
-                await repository.UpdateAsync(current =>
-                    current.Library.Single(item => item.Game.Id == game.Id).ExecutablePath = path);
-                await CloseDialogAsync();
-                await RenderAsync();
-                Notify("Spieldatei verknüpft", "Öffne die Spieldetails erneut, um das Spiel zu starten.");
-            });
+            var executable = Button("EXE auswählen", () => LinkExecutableAsync(game.Id));
             executable.IsEnabled = !tracker.IsRunning(game.Id);
             actions.Children.Add(executable);
             body.Children.Add(actions);
@@ -353,35 +374,17 @@ public sealed partial class MainWindow : Window
                 await CloseDialogAsync();
                 await RenderAsync();
             }));
-            var remove = Button("Aus Bibliothek entfernen", async () =>
-            {
-                await CloseDialogAsync();
-                if (!await ConfirmAsync("Spiel entfernen?", "Spieldateien bleiben erhalten. Die lokal gespeicherte Spielzeit und Favoritenmarkierung werden entfernt.", "Entfernen"))
-                    return;
-                if (tracker.IsRunning(game.Id))
-                    throw new InvalidOperationException("Laufende Spiele können nicht entfernt werden.");
-                await repository.UpdateAsync(current => current.Library.RemoveAll(item => item.Game.Id == game.Id));
-                await RenderAsync();
-            });
+            var remove = Button("Aus Bibliothek entfernen", () => RemoveLibraryGameAsync(game.Id));
             remove.IsEnabled = !tracker.IsRunning(game.Id);
             body.Children.Add(remove);
         }
-        var magnet = entry?.Game.MagnetUri ?? game.MagnetUri;
-        if (!string.IsNullOrWhiteSpace(magnet))
+        var download = GameInstallation.ResolveDownload(game, state.Settings, state.CatalogCache);
+        if (download.Source is not null)
         {
             body.Children.Add(Text("Downloads werden an deinen qBittorrent-Server übergeben. Installation und EXE-Auswahl erfolgen anschließend manuell.", 12, Muted));
-            body.Children.Add(Button("Mit qBittorrent herunterladen", async () =>
-            {
-                await CloseDialogAsync();
-                if (!await ConfirmAsync("Download an Server senden?",
-                    $"„{game.Title}“ wird auf deinem qBittorrent-Server heruntergeladen. Lade nur Inhalte herunter, für deren Nutzung und Verbreitung du die nötigen Rechte besitzt. Es wird nichts automatisch ausgeführt.",
-                    "Download starten")) return;
-                using var client = CreateQBitClient();
-                await client.AddAsync(magnet);
-                Notify("Download übergeben", "Den Fortschritt findest du unter Downloads.");
-            }));
+            body.Children.Add(Button("Mit qBittorrent herunterladen", () => DownloadGameAsync(game)));
         }
-        else body.Children.Add(Text("Für dieses Spiel stellt der Katalog keinen Torrent-Download bereit.", 12, Muted));
+        else body.Children.Add(Text(download.UnavailableReason!, 12, Muted));
     }
 
     private async Task AddLocalGameAsync()
@@ -459,7 +462,7 @@ public sealed partial class MainWindow : Window
             info.Children.Add(Text("Letzter Start: " + FormatDate(entry.LastPlayed), 12, Muted));
             Grid.SetColumn(info, 1);
             card.Children.Add(info);
-            var open = Button(card, () => OpenGameAsync(entry.Game));
+            var open = Button(card, () => OpenLibraryGameAsync(entry.Game));
             open.HorizontalAlignment = HorizontalAlignment.Stretch;
             open.HorizontalContentAlignment = HorizontalAlignment.Stretch;
             activity.Children.Add(open);
@@ -602,7 +605,14 @@ public sealed partial class MainWindow : Window
     {
         PageHost.Children.Add(Eyebrow("DEINE VERBINDUNGEN"));
         PageHost.Children.Add(Text("Einstellungen", 34));
+        PageHost.Children.Add(Button("Temporäres Theme-Labor öffnen · F8", () =>
+        {
+            if (ThemePreviewPane.Visibility != Visibility.Visible) ToggleThemePreview();
+            return Task.CompletedTask;
+        }, true));
         var form = new StackPanel { Spacing = 18, MaxWidth = 740, HorizontalAlignment = HorizontalAlignment.Left };
+        RenderSourceSettings(form);
+        form.Children.Add(new Border { Height = 1, Background = SurfaceBorder, Margin = new Thickness(0, 8, 0, 8) });
         form.Children.Add(Text("Spielekatalog", 22));
         form.Children.Add(Text("Der Katalog liefert Titel, Genres, Popularität und optionale Magnet-Links. qBittorrent übernimmt nur die Downloads und ist keine Spiele-Suchmaschine.", 14, Muted));
         var catalogUrl = new TextBox { Header = "Katalog-URL (HTTP/HTTPS)", PlaceholderText = "https://dein-server.example/games.json",
@@ -632,6 +642,7 @@ public sealed partial class MainWindow : Window
             };
             await repository.UpdateAsync(current =>
             {
+                settings.SourceUrls = current.Settings.SourceUrls;
                 if (!string.Equals(current.Settings.CatalogUrl, address, StringComparison.Ordinal))
                 {
                     current.CatalogCache.Clear();
@@ -755,16 +766,16 @@ public sealed partial class MainWindow : Window
         dialog.RequestedTheme = ElementTheme.Dark;
         dialog.Background = (Brush)Application.Current.Resources["LauncherDialogBrush"];
         dialog.BorderBrush = SurfaceBorder;
-        dialog.CornerRadius = Rounded;
+        ThemeCorners(dialog);
         dialog.Resources.ThemeDictionaries["Dark"] = new ResourceDictionary
         {
             ["ContentDialogTopOverlay"] = Surface,
             ["AccentButtonBackground"] = Application.Current.Resources["LauncherActionBrush"],
             ["AccentButtonBackgroundPointerOver"] = Application.Current.Resources["LauncherActionHoverBrush"],
             ["AccentButtonBackgroundPressed"] = Application.Current.Resources["LauncherActionPressedBrush"],
-            ["AccentButtonForeground"] = Brush(255, 255, 255),
-            ["AccentButtonForegroundPointerOver"] = Brush(255, 255, 255),
-            ["AccentButtonForegroundPressed"] = Brush(255, 255, 255)
+            ["AccentButtonForeground"] = OnAction,
+            ["AccentButtonForegroundPointerOver"] = OnAction,
+            ["AccentButtonForegroundPressed"] = OnAction
         };
         try { return await dialog.ShowAsync(); }
         finally
@@ -835,23 +846,26 @@ public sealed partial class MainWindow : Window
             return;
         }
         closing = true;
+        sourceSearchCancellation.Cancel();
+        CancelActiveSourceSearch();
         CancelOnlineRequest();
         timer.Stop();
         noticeTimer.Stop();
         Root.IsHitTestVisible = false;
         await RunAsync(tracker.StopAsync);
+        websiteSources?.Dispose();
         http.Dispose();
         Close();
     }
 
     private Button Button(object content, Func<Task> action, bool primary = false)
     {
-        var button = new Button { Content = content, Padding = new Thickness(14, 8, 14, 8),
-            CornerRadius = Rounded, VerticalAlignment = VerticalAlignment.Center };
+        var button = ThemeCorners(new Button { Content = content, Padding = new Thickness(14, 8, 14, 8),
+            VerticalAlignment = VerticalAlignment.Center });
         if (primary)
         {
             button.Background = (SolidColorBrush)Application.Current.Resources["LauncherActionBrush"];
-            button.Foreground = Brush(255, 255, 255);
+            button.Foreground = OnAction;
         }
         button.Click += async (_, _) =>
         {
@@ -867,7 +881,7 @@ public sealed partial class MainWindow : Window
     private static TextBlock Text(string text, double size = 14, Brush? foreground = null) => new()
     {
         Text = text, FontSize = size, TextWrapping = TextWrapping.Wrap,
-        Foreground = foreground ?? Brush(255, 241, 242),
+        Foreground = foreground ?? MainText,
         FontWeight = size >= 20 ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
         VerticalAlignment = VerticalAlignment.Center
     };
@@ -887,13 +901,13 @@ public sealed partial class MainWindow : Window
         return panel;
     }
 
-    private static Border Panel(UIElement child) => new()
+    private static Border Panel(UIElement child) => ThemeCorners(new Border
     {
         Background = Surface,
         BorderBrush = SurfaceBorder,
-        BorderThickness = new Thickness(1), CornerRadius = Rounded,
+        BorderThickness = new Thickness(1),
         Padding = new Thickness(20), Child = child
-    };
+    });
 
     private static Border Stat(string value, string label)
     {
@@ -947,20 +961,11 @@ public sealed partial class MainWindow : Window
             };
             grid.Children.Add(image);
         }
-        return new Border { CornerRadius = Rounded, Child = grid };
+        return ThemeCorners(new Border { Child = grid });
     }
 
-    private static LinearGradientBrush Gradient()
-    {
-        var color = ((SolidColorBrush)Application.Current.Resources["LauncherSurfaceTint"]).Color;
-        color.A = 255;
-        var end = ((SolidColorBrush)Application.Current.Resources["LauncherLibrarySidebarBrush"]).Color;
-        end.A = 255;
-        var brush = new LinearGradientBrush { StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(1, 1) };
-        brush.GradientStops.Add(new GradientStop { Color = color, Offset = 0 });
-        brush.GradientStops.Add(new GradientStop { Color = end, Offset = 1 });
-        return brush;
-    }
+    private static LinearGradientBrush Gradient() =>
+        (LinearGradientBrush)Application.Current.Resources["LauncherGradientBrush"];
 
     private static string GenreIcon(string genre) => genre switch
     {
