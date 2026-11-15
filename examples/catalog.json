@@ -1,0 +1,12 @@
+[
+  {
+    "id": "my-authorized-game",
+    "title": "Mein freigegebenes Spiel",
+    "description": "Ein Beispiel für ein Spiel, das du selbst veröffentlicht hast oder weiterverbreiten darfst.",
+    "genre": "Adventure",
+    "tags": ["Entdecken", "Indie"],
+    "popularity": 100,
+    "coverUrl": null,
+    "magnetUri": null
+  }
+]

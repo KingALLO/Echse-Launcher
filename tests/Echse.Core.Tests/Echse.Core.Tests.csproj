@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <ProjectReference Include="..\..\src\Echse.Core\Echse.Core.csproj" />
+    <ProjectReference Include="..\Echse.TestGame\Echse.TestGame.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <Target Name="CopyGameFixture" AfterTargets="Build">
+    <MSBuild Projects="..\Echse.TestGame\Echse.TestGame.csproj" Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration);Platform=$(Platform)">
+      <Output TaskParameter="TargetOutputs" ItemName="GameFixtureAssembly" />
+    </MSBuild>
+    <PropertyGroup>
+      <GameFixtureDirectory>@(GameFixtureAssembly->'%(RootDir)%(Directory)')</GameFixtureDirectory>
+    </PropertyGroup>
+    <ItemGroup>
+      <GameFixtureFiles Include="$(GameFixtureDirectory)*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(GameFixtureFiles)" DestinationFolder="$(OutDir)GameFixture" SkipUnchangedFiles="true" />
+  </Target>
+</Project>
