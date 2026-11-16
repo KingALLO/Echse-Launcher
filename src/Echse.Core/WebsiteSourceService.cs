@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
+using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using AngleSharp.Html.Parser;
 
@@ -11,6 +12,7 @@ public sealed record SourceDownload(
     string SourceName, string SourceUrl, string Title, string MagnetUri, string PageUrl, int Score)
 {
     public bool IsLikely => Score >= ReleaseTitleMatcher.LikelyScore;
+    public bool IsCollection { get; init; }
 }
 
 public sealed record SourceError(string SourceUrl, string Message);
@@ -26,6 +28,9 @@ public sealed class WebsiteSourceService : IDisposable
     private const int MaxMagnetLength = 8192;
     private static readonly TimeSpan RequestInterval = TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan SourceLifetime = TimeSpan.FromMinutes(10);
+    private static readonly Regex GenericDownloadLabel = new(
+        @"^(?:\W|\d|\b(?:magnet|torrent|download|downloads|link|links|mirror|mirrors|direct|options|click|here|to|get|this|repack|herunterladen|direkt|jetzt|öffnen|downloaden)\b)*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly HashSet<string> SearchNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "s", "q", "query", "search", "search_query", "searchterm", "search-term", "keyword", "keywords", "term"
@@ -111,13 +116,13 @@ public sealed class WebsiteSourceService : IDisposable
             var title = CleanTitle(heading.TextContent);
             if (title.Length is 0 or > 300) continue;
             var score = ReleaseTitleMatcher.Score(game.Title, title);
-            if (score > 0)
+            if (score > 0 && !ReleaseTitleMatcher.IsCollectionCandidate(game.Title, title))
             {
                 var link = heading.QuerySelector("a[href]") ?? heading.Closest("a[href]");
                 var pageUrl = link is not null &&
                     Uri.TryCreate(searchPage.Url, link.GetAttribute("href"), out var uri) && IsPermitted(source.HomeUrl, uri)
                     ? WithoutFragment(uri) : searchPage.Url;
-                AddMagnets(block, source.Name, sourceUrl, title, pageUrl, score, downloads, ref invalidMagnet);
+                AddMagnets(block, game.Title, source.Name, sourceUrl, title, pageUrl, score, downloads, ref invalidMagnet);
             }
         }
         if (blocks.Length == 0 && (search.QuerySelector("main") ?? search.Body) is { } searchContent)
@@ -127,12 +132,23 @@ public sealed class WebsiteSourceService : IDisposable
             {
                 var title = CleanTitle(headings[0].TextContent);
                 var score = title.Length is > 0 and <= 300 ? ReleaseTitleMatcher.Score(game.Title, title) : 0;
-                if (score > 0)
-                    AddMagnets(searchContent, source.Name, sourceUrl, title, searchPage.Url, score, downloads, ref invalidMagnet);
+                if (score > 0 && !ReleaseTitleMatcher.IsCollectionCandidate(game.Title, title))
+                    AddMagnets(searchContent, game.Title, source.Name, sourceUrl, title, searchPage.Url, score, downloads, ref invalidMagnet);
             }
         }
 
         var candidates = FindCandidates(search, searchPage.Url, source.HomeUrl, game.Title);
+        var collectionSearchTitle = ReleaseTitleMatcher.CollectionSearchTitle(game.Title);
+        if (downloads.Count == 0 && candidates.Count == 0 && collectionSearchTitle.Length > 0 &&
+            collectionSearchTitle != game.Title)
+        {
+            var collectionPage = await GetPageAsync(BuildSearchUrl(source.Form, collectionSearchTitle),
+                source.HomeUrl, cancellationToken);
+            using var collections = new HtmlParser().ParseDocument(collectionPage.Html);
+            ThrowIfBrowserCheck(collections);
+            candidates.AddRange(FindCandidates(collections, collectionPage.Url, source.HomeUrl, game.Title)
+                .Where(candidate => ReleaseTitleMatcher.IsCollectionCandidate(game.Title, candidate.Title)));
+        }
         if (candidates.Count > MaxDetailPages)
             errors.Add(new SourceError(sourceUrl, $"Es wurden nur die ersten {MaxDetailPages} passenden Trefferseiten geprüft."));
         foreach (var candidate in candidates.Take(MaxDetailPages))
@@ -158,7 +174,10 @@ public sealed class WebsiteSourceService : IDisposable
                     detail.QuerySelector("article") ?? detail.QuerySelector("main") ?? detail.Body;
                 if (content is null)
                     throw new InvalidDataException("Die Trefferseite enthält keinen lesbaren Inhalt.");
-                AddMagnets(content, source.Name, sourceUrl, title, detailPage.Url, score, downloads, ref invalidMagnet);
+                var collection = ReleaseTitleMatcher.IsCollectionCandidate(game.Title, title);
+                if (collection && !ContainsIncludedGame(content, game.Title)) continue;
+                AddMagnets(content, game.Title, source.Name, sourceUrl, title, detailPage.Url, score, downloads, ref invalidMagnet,
+                    collection);
             }
             catch (Exception exception) when (IsSourceFailure(exception))
             {
@@ -287,22 +306,74 @@ public sealed class WebsiteSourceService : IDisposable
     }
 
     private static void AddMagnets(
-        IParentNode content, string sourceName, string sourceUrl, string title, Uri pageUrl, int score,
-        List<SourceDownload> downloads, ref bool invalidMagnet)
+        IParentNode content, string gameTitle, string sourceName, string sourceUrl, string title, Uri pageUrl, int score,
+        List<SourceDownload> downloads, ref bool invalidMagnet, bool collection = false)
     {
         foreach (var anchor in content.QuerySelectorAll("a[href]"))
         {
             var magnet = anchor.GetAttribute("href")?.Trim();
             if (magnet is null || !magnet.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase)) continue;
+            if (anchor.Closest("aside, nav, footer, .related, .related-posts, .recommendations") is not null)
+                continue;
+            // Nested result blocks must not inherit the title of their containing article.
+            var block = anchor.Closest("article, .search-result, .search-item, .result, .post");
+            var heading = block?.QuerySelector("h1, h2, h3, h4");
+            if (heading is not null && ReleaseTitleMatcher.Score(gameTitle, CleanTitle(heading.TextContent)) == 0)
+                continue;
             try
             {
                 if (magnet.Length > MaxMagnetLength)
                     throw new ArgumentException("Magnet-Link zu lang.");
                 MagnetLink.Validate(magnet);
-                downloads.Add(new SourceDownload(sourceName, sourceUrl, title, magnet, pageUrl.AbsoluteUri, score));
+                if (!MatchesMagnetContext(anchor, content, gameTitle, title)) continue;
+                var names = new Uri(magnet).Query.TrimStart('?').Split('&')
+                    .Select(part => part.Split('=', 2))
+                    .Where(pair => pair.Length == 2 && pair[0].Equals("dn", StringComparison.OrdinalIgnoreCase))
+                    .Select(pair => Uri.UnescapeDataString(pair[1].Replace("+", " ")))
+                    .ToList();
+                if (names.Any(name => ReleaseTitleMatcher.Score(collection ? title : gameTitle, name) == 0)) continue;
+                downloads.Add(new SourceDownload(sourceName, sourceUrl, title, magnet, pageUrl.AbsoluteUri, score)
+                {
+                    IsCollection = collection
+                });
             }
             catch (ArgumentException) { invalidMagnet = true; }
         }
+    }
+
+    private static bool ContainsIncludedGame(IParentNode content, string gameTitle)
+    {
+        foreach (var heading in content.QuerySelectorAll("h2, h3, h4, p"))
+        {
+            if (!Regex.IsMatch(CleanTitle(heading.TextContent),
+                @"^(included (?:content|games)|games included|enthaltene (?:spiele|inhalte)|(?:[\p{L}\p{N} '-]+ )?(?:collection|bundle|trilogy|quadrilogy|anthology) contents)\s*:?\s*$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)) continue;
+            if (heading.NextElementSibling is not { } list || list.LocalName is not ("ul" or "ol")) continue;
+            foreach (var item in list.QuerySelectorAll("li"))
+            {
+                var name = CleanTitle(item.TextContent).Split(',', 2)[0];
+                if (ReleaseTitleMatcher.Score(gameTitle, name) == 100) return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool MatchesMagnetContext(IElement anchor, IParentNode content, string gameTitle, string releaseTitle)
+    {
+        bool Matches(string text) => text.Length <= 300 &&
+            (GenericDownloadLabel.IsMatch(text) || ReleaseTitleMatcher.Score(gameTitle, text) > 0 ||
+                ReleaseTitleMatcher.Score(releaseTitle, text) > 0);
+        if (!Matches(CleanTitle(anchor.TextContent))) return false;
+        var branch = anchor;
+        for (var parent = anchor.ParentElement; parent is not null; parent = parent.ParentElement)
+        {
+            var heading = parent.Children.TakeWhile(child => !ReferenceEquals(child, branch))
+                .LastOrDefault(child => child.LocalName is "h1" or "h2" or "h3" or "h4");
+            if (heading is not null && !Matches(CleanTitle(heading.TextContent))) return false;
+            if (ReferenceEquals(parent, content)) break;
+            branch = parent;
+        }
+        return true;
     }
 
     private async Task<HtmlPage> GetPageAsync(Uri address, Uri origin, CancellationToken cancellationToken)

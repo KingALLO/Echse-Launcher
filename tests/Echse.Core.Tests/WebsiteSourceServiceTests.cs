@@ -17,7 +17,31 @@ public sealed class WebsiteSourceServiceTests
     [InlineData("Portal", "Portal 2", 0)]
     [InlineData("Portal", "Portal II", 0)]
     [InlineData("Portal", "Portal Collection", 50)]
+    [InlineData("Portal 2", "Portal Collection", 50)]
+    [InlineData("Portal", "Portal Knights", 0)]
+    [InlineData("Portal", "Portal Reloaded", 0)]
+    [InlineData("Portal", "Portal Complete Another Game", 0)]
+    [InlineData("Portal", "Portal MULTIVERSE", 0)]
+    [InlineData("Portal", "Portal MULTI12", 95)]
+    [InlineData("Portal", "Portal Premium Edition", 95)]
+    [InlineData("Portal", "Portal Gold Edition", 95)]
+    [InlineData("Portal", "Portal Premium", 0)]
+    [InlineData("Portal", "Portal Premium Knights", 0)]
+    [InlineData("Portal", "Portal Premium Edition Another Game", 0)]
+    [InlineData("Bodycam", "Live Lens Bodycam", 0)]
+    [InlineData("POSTAL 2", "POSTAL 4: No Regerts", 0)]
+    [InlineData("Jurassic World Evolution 3", "Jurassic World Evolution 3: Premium Edition, v1.3.5.915680 + 4 DLCs", 95)]
+    [InlineData("Half-Life", "Half.Life.v1.0.GOG", 95)]
+    [InlineData("Half-Life", "Half-Life 2", 0)]
+    [InlineData("Half-Life", "Half-Life Blue Shift", 0)]
     [InlineData("Baldur's Gate 3", "Baldurs.Gate.3.v4.1.1", 95)]
+    [InlineData("Half-Life 2", "Half-Life 2: 20th Anniversary Edition – Build 16431800 + Bonus Soundtracks", 95)]
+    [InlineData("Half-Life: Alyx", "Half-Life: Alyx – v1.5.4 + DLC + HLA-NoVR-Launcher v4.2.4", 50)]
+    [InlineData("Half-Life 2", "Half-Life 2 (Build 16431800 + Bonus Soundtracks, MULTi18) [FitGirl Repack, Selective Download - from 3.4 GB]", 95)]
+    [InlineData("Portal", "rutor.info_Portal.v1.0 [FitGirl Repack]", 95)]
+    [InlineData("Half-Life", "Half-Life: Source Quadrilogy – v09.26.2019 + 4 OSTs", 50)]
+    [InlineData("Half-Life 2", "Half-Life 2: Episode One", 0)]
+    [InlineData("Half-Life", "Half-Life: Alyx – v1.5.4", 0)]
     public void ScoresReleaseNames(string title, string release, int expected) =>
         Assert.Equal(expected, ReleaseTitleMatcher.Score(title, release));
 
@@ -35,7 +59,7 @@ public sealed class WebsiteSourceServiceTests
         Assert.Throws<ArgumentException>(() => WebsiteSourceService.NormalizeUrl(input));
 
     [Fact]
-    public async Task SearchesWebsitesAndShowsUncertainMatchesAndSourceErrors()
+    public async Task SearchesWebsitesWithoutAmbiguousTitlesAndPreservesSourceErrors()
     {
         var requests = new ConcurrentQueue<Uri>();
         using var service = new WebsiteSourceService(new Handler(request =>
@@ -78,24 +102,171 @@ public sealed class WebsiteSourceServiceTests
         var result = await service.SearchAsync(["https://games.example/", "https://offline.example/"],
             new Game { Id = "steam:400", Title = "Portal", SteamAppId = 400 });
 
-        Assert.Collection(result.Downloads,
-            first =>
-            {
-                Assert.Equal("Portal v1.0", first.Title);
-                Assert.True(first.IsLikely);
-                Assert.Equal("Games", first.SourceName);
-                Assert.Equal(Magnet + "&dn=Portal", first.MagnetUri);
-                Assert.Equal("https://games.example/portal-release", first.PageUrl);
-            },
-            second =>
-            {
-                Assert.Equal("Portal Collection", second.Title);
-                Assert.False(second.IsLikely);
-            });
+        var first = Assert.Single(result.Downloads);
+        Assert.Equal("Portal v1.0", first.Title);
+        Assert.True(first.IsLikely);
+        Assert.Equal("Games", first.SourceName);
+        Assert.Equal(Magnet + "&dn=Portal", first.MagnetUri);
+        Assert.Equal("https://games.example/portal-release", first.PageUrl);
         Assert.Contains(result.Errors, error => error.SourceUrl == "https://offline.example/" && error.Message.Contains("503"));
         Assert.Contains(result.Errors, error => error.SourceUrl == "https://games.example/" && error.Message.Contains("Ungültige Magnet"));
         Assert.Contains(requests, uri => uri.PathAndQuery == "/search?scope=games&kind=game&term=Portal");
         Assert.DoesNotContain(requests, uri => uri.Host == "other.example" || uri.AbsolutePath == "/portal-2");
+    }
+
+    [Theory]
+    [InlineData("Half-Life 2", "Half-Life 2: 20th Anniversary Edition – Build 16431800 + Bonus Soundtracks",
+        "Half-Life 2 (Build 16431800 + Bonus Soundtracks, MULTi18) [FitGirl Repack, Selective Download - from 3.4 GB]")]
+    [InlineData("Half-Life: Alyx", "Half-Life: Alyx – v1.5.4 + DLC + HLA-NoVR-Launcher v4.2.4",
+        "Half-Life Alyx v1.5.4 + DLC [FitGirl Repack]")]
+    [InlineData("Jurassic World Evolution 3", "Jurassic World Evolution 3: Premium Edition, v1.3.5.915680 + 4 DLCs",
+        "Jurassic World Evolution 3: Premium Edition (v1.3.5.915680 + 4 DLCs, MULTi13) [FitGirl Hypervisor Repack, Selective Download - from 9.1 GB]")]
+    public async Task FindsReleasesWithEditionBuildBonusAndRepackMetadata(string game, string title, string name)
+    {
+        using var service = new WebsiteSourceService(new Handler(request =>
+            request.RequestUri!.AbsolutePath switch
+            {
+                "/" when request.RequestUri.Query.Length == 0 => Html("""<form><input type="search" name="q"></form>"""),
+                "/" => Html($"""<article><h2><a href="/release">{title}</a></h2></article>"""),
+                "/release" => Html($"""
+                    <article><h1>{title}</h1><div class="entry-content">
+                        <h3>Download Mirrors (Torrent)</h3>
+                        <a href="{Magnet}&amp;dn={Uri.EscapeDataString(name)}">Get this repack</a>
+                    </div></article>
+                    """),
+                _ => Status(HttpStatusCode.NotFound)
+            }));
+        var result = await service.SearchAsync(["https://games.example/"], new Game { Title = game });
+        var download = Assert.Single(result.Downloads);
+        Assert.Equal(title, download.Title);
+        Assert.False(download.IsCollection);
+        Assert.Empty(result.Errors);
+    }
+
+    [Theory]
+    [InlineData("Portal", "Portal", true)]
+    [InlineData("Portal 2", "Portal 2", true)]
+    [InlineData("Portal", "Portal 2", false)]
+    [InlineData("Portal 2", "Portal 2: Sixense Perceptual Pack", false)]
+    [InlineData("Portal", "Portal – Soundtrack", false)]
+    public async Task RequiresExplicitCollectionMembershipBeforeShowingItsDownloads(
+        string game, string includedGame, bool expected)
+    {
+        var detailRequested = false;
+        using var service = new WebsiteSourceService(new Handler(request =>
+        {
+            if (request.RequestUri!.PathAndQuery == "/")
+                return Html("""<form><input type="search" name="q"></form>""");
+            if (request.RequestUri.AbsolutePath == "/collection")
+            {
+                detailRequested = true;
+                return Html($"""
+                    <article><h1>Portal Collection</h1><div class="entry-content">
+                        <h3>Download Mirrors</h3><a href="{Magnet}">[magnet]</a>
+                        <h3>Included Content</h3><ul><li>{includedGame}, Build 123456 (May 1, 2020)</li></ul>
+                        <h3>Description</h3><p>Portal and Portal 2 are mentioned outside the inclusion list.</p>
+                    </div></article>
+                    """);
+            }
+            return Html($"""
+                <article><h2><a href="/collection">Portal Collection</a></h2>
+                    <a href="{Magnet}">Magnet</a>
+                </article>
+                <article><h2><a href="/knights">Portal Knights</a></h2><a href="{OtherMagnet}">Magnet</a></article>
+                """);
+        }));
+        var result = await service.SearchAsync(["https://games.example/"], new Game { Title = game });
+        Assert.True(detailRequested);
+        if (expected)
+        {
+            var download = Assert.Single(result.Downloads);
+            Assert.True(download.IsCollection);
+            Assert.False(download.IsLikely);
+            Assert.Equal("Portal Collection", download.Title);
+        }
+        else Assert.Empty(result.Downloads);
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public async Task CollectionMentionOutsideTheInclusionListDoesNotProveMembership()
+    {
+        using var service = new WebsiteSourceService(new Handler(request =>
+            request.RequestUri!.PathAndQuery switch
+            {
+                "/" => Html("""<form><input type="search" name="q"></form>"""),
+                "/?q=Portal" => Html("""<article><h2><a href="/collection">Portal Collection</a></h2></article>"""),
+                "/collection" => Html($"""
+                    <article><h1>Portal Collection</h1><div class="entry-content">
+                        <h3>Download Mirrors</h3><a href="{Magnet}">Magnet</a>
+                        <h3>Included Content</h3><ul><li>Portal 2</li></ul>
+                        <h3>Related games</h3><ul><li>Portal</li></ul>
+                    </div></article>
+                    """),
+                _ => Status(HttpStatusCode.NotFound)
+            }));
+        Assert.Empty((await service.SearchAsync(["https://games.example/"], new Game { Title = "Portal" })).Downloads);
+    }
+
+    [Theory]
+    [InlineData("Portal 2", "Portal", "Portal Collection", "Included Content", "Portal 2", true)]
+    [InlineData("Half-Life 2: Episode One", "Half-Life", "Half-Life: Source Quadrilogy", "Source Quadrilogy Contents",
+        "Half-Life 2: Episode One", true)]
+    [InlineData("Half-Life: Opposing Force", "Half-Life", "Half-Life: Source Quadrilogy", "Source Quadrilogy Contents",
+        "Half-Life Source", false)]
+    public async Task RetriesSeriesSearchOnlyForCollectionsAndStillRequiresTheExactGame(
+        string title, string series, string collection, string heading, string included, bool expected)
+    {
+        var queries = new List<string>();
+        using var service = new WebsiteSourceService(new Handler(request =>
+        {
+            var uri = request.RequestUri!;
+            if (uri.PathAndQuery == "/") return Html("""<form><input type="search" name="q"></form>""");
+            if (uri.AbsolutePath == "/collection") return Html($"""
+                <article><h1>{collection}</h1><div class="entry-content">
+                    <h3>Download Mirrors</h3><a href="{Magnet}">Magnet</a>
+                    <p><strong>{heading}</strong></p><ul><li>{included}</li></ul>
+                </div></article>
+                """);
+            queries.Add(WebUtility.UrlDecode(uri.Query["?q=".Length..]));
+            if (queries.Last() == series)
+                return Html($"""
+                    <article><h2><a href="/collection">{collection}</a></h2></article>
+                    <article><h2>Unrelated game</h2><a href="{OtherMagnet}">Magnet</a></article>
+                    """);
+            return Html("<main>No matching titles</main>");
+        }));
+        var result = await service.SearchAsync(["https://games.example/"], new Game { Title = title });
+        Assert.Equal(new[] { title, series }, queries);
+        Assert.Equal(expected ? 1 : 0, result.Downloads.Count);
+        Assert.All(result.Downloads, download => Assert.True(download.IsCollection));
+        Assert.Empty(result.Errors);
+    }
+
+    [Fact]
+    public async Task MatchingPageDoesNotRelabelForeignMagnetsOrNestedResults()
+    {
+        using var service = new WebsiteSourceService(new Handler(request =>
+            request.RequestUri!.PathAndQuery switch
+            {
+                "/" => Html("""<form><input type="search" name="q"></form>"""),
+                "/?q=Portal" => Html($"""
+                    <article><h1>Portal</h1>
+                        <a href="{Magnet}&amp;dn=Portal.v1.0.Complete-GOG">Magnet</a>
+                        <a href="{OtherMagnet}&amp;dn=Portal+2">Magnet</a>
+                        <a href="{OtherMagnet}&amp;dn=Half-Life">Magnet</a>
+                        <a href="{OtherMagnet}">Half-Life</a>
+                        <section><h2>Half-Life</h2><a href="{OtherMagnet}">Magnet</a></section>
+                        <section><h2>Downloads</h2><a href="{Magnet}">Magnet Link</a></section>
+                        <aside><a href="{OtherMagnet}">Recommended</a></aside>
+                        <div class="related-posts"><a href="{OtherMagnet}">Magnet</a></div>
+                        <div class="result"><h2>Portal Knights</h2><a href="{OtherMagnet}">Magnet</a></div>
+                    </article>
+                    """),
+                _ => Status(HttpStatusCode.NotFound)
+            }));
+        var result = await service.SearchAsync(["https://games.example/"], new Game { Title = "Portal" });
+        Assert.StartsWith(Magnet, Assert.Single(result.Downloads).MagnetUri);
     }
 
     [Fact]

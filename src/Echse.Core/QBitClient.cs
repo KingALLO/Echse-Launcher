@@ -34,26 +34,56 @@ public sealed class QBitClient : IDisposable
         using var response = await SendAsync("api/v2/app/version", null, cancellationToken);
     }
 
-    public async Task AddAsync(string magnet, CancellationToken cancellationToken = default)
+    public Task AddAsync(string magnet, CancellationToken cancellationToken = default) =>
+        AddTorrentAsync(magnet, null, cancellationToken);
+
+    public Task AddAsync(string magnet, string savePath, CancellationToken cancellationToken = default)
+    {
+        if (!Path.IsPathFullyQualified(savePath))
+            throw new ArgumentException("Der Download benötigt einen absoluten Zielordner.");
+        return AddTorrentAsync(magnet, savePath, cancellationToken);
+    }
+
+    private async Task AddTorrentAsync(string magnet, string? savePath, CancellationToken cancellationToken)
     {
         MagnetLink.Validate(magnet);
-        using var response = await SendAsync("api/v2/torrents/add", new Dictionary<string, string>
+        var form = new Dictionary<string, string>
         {
             ["urls"] = magnet,
             ["tags"] = "echse"
-        }, cancellationToken);
+        };
+        if (savePath is not null)
+        {
+            form["savepath"] = savePath;
+            form["autoTMM"] = "false";
+        }
+        using var response = await SendAsync("api/v2/torrents/add", form, cancellationToken);
         if (!(await response.Content.ReadAsStringAsync(cancellationToken)).Trim().Equals("Ok.", StringComparison.Ordinal))
             throw new InvalidOperationException("qBittorrent hat den Download nicht angenommen.");
     }
 
-    public async Task<IReadOnlyList<TorrentStatus>> GetDownloadsAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<TorrentStatus>> GetDownloadsAsync(CancellationToken cancellationToken = default) =>
+        ReadTorrentsAsync("api/v2/torrents/info?tag=echse", cancellationToken);
+
+    public async Task<TorrentStatus?> GetTorrentAsync(string hash, CancellationToken cancellationToken = default)
     {
-        using var response = await SendAsync("api/v2/torrents/info?tag=echse", null, cancellationToken);
+        var normalized = MagnetLink.GetInfoHash("magnet:?xt=urn:btih:" + hash);
+        var torrents = await ReadTorrentsAsync("api/v2/torrents/info?hashes=" + normalized.ToLowerInvariant(), cancellationToken);
+        return torrents.SingleOrDefault(item => item.Hash.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task<IReadOnlyList<TorrentStatus>> ReadTorrentsAsync(string route, CancellationToken cancellationToken)
+    {
+        using var response = await SendAsync(route, null, cancellationToken);
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         var torrents = await JsonSerializer.DeserializeAsync<List<TorrentDto>>(stream,
             StateRepository.JsonOptions, cancellationToken)
             ?? throw new InvalidDataException("qBittorrent lieferte keine gültige Download-Liste.");
-        return torrents.Select(item => new TorrentStatus(item.Name, item.Progress, item.State, item.Speed)).ToList();
+        return torrents.Select(item => new TorrentStatus(item.Name, item.Progress, item.State, item.Speed)
+        {
+            Hash = item.Hash, SavePath = item.SavePath, AmountLeft = item.AmountLeft,
+            TotalSize = item.TotalSize, CompletedBytes = item.CompletedBytes, EtaSeconds = item.EtaSeconds
+        }).ToList();
     }
 
     private async Task<HttpResponseMessage> SendAsync(string route, Dictionary<string, string>? form,
@@ -117,5 +147,16 @@ public sealed class QBitClient : IDisposable
         public string State { get; init; } = "";
         [JsonPropertyName("dlspeed")]
         public long Speed { get; init; }
+        public string Hash { get; init; } = "";
+        [JsonPropertyName("save_path")]
+        public string SavePath { get; init; } = "";
+        [JsonPropertyName("amount_left")]
+        public long AmountLeft { get; init; } = -1;
+        [JsonPropertyName("total_size")]
+        public long TotalSize { get; init; } = -1;
+        [JsonPropertyName("completed")]
+        public long CompletedBytes { get; init; } = -1;
+        [JsonPropertyName("eta")]
+        public long EtaSeconds { get; init; } = -1;
     }
 }

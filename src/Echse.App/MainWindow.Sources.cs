@@ -144,7 +144,7 @@ public sealed partial class MainWindow
         foreach (var error in result.Errors)
             host.Children.Add(Text($"{SourceLabel(error.SourceUrl)}: {error.Message}", 12, Muted));
         if (result.Downloads.Count == 0)
-            host.Children.Add(Text("Auf den ausgelesenen Seiten wurden keine passenden Magnet-Links gefunden. Inhalte, die erst nach Anmeldung oder durch JavaScript erscheinen, werden nicht erfasst.", 14, Muted));
+            host.Children.Add(Text("Auf den ausgelesenen Seiten wurden keine passenden Magnet-Links gefunden. Nicht jedes Spiel aus dem Steam-Katalog wird von deinen Quellen angeboten. Prüfe auch die Suche direkt auf der Quellwebsite; Inhalte, die erst nach Anmeldung oder durch JavaScript erscheinen, werden nicht erfasst.", 14, Muted));
         else
         {
             host.Children.Add(Text($"{result.Downloads.Count} Treffer · beste Titelübereinstimmung zuerst", 15));
@@ -177,7 +177,8 @@ public sealed partial class MainWindow
         (Uri.TryCreate(sourceUrl, UriKind.Absolute, out var uri) ? uri.Host : sourceUrl);
 
     private static string DownloadFacts(SourceDownload download) =>
-        $"{(download.IsLikely ? "Titel passt sehr wahrscheinlich" : "Möglicher Treffer – bitte prüfen")} · {download.SourceName}\n" +
+        $"{(download.IsCollection ? "Sammlung mit diesem Spiel – enthält weitere Titel" :
+            download.IsLikely ? "Titel passt sehr wahrscheinlich" : "Release-Zusätze – bitte prüfen")} · {download.SourceName}\n" +
         $"BTIH {MagnetLink.GetInfoHash(download.MagnetUri)}";
 
     private async Task ShowSourceDownloadChoiceAsync(Game game)
@@ -212,19 +213,10 @@ public sealed partial class MainWindow
         if (!snapshot.Settings.SourceUrls.Contains(download.SourceUrl, StringComparer.Ordinal))
             throw new InvalidOperationException("Diese Quelle wurde inzwischen entfernt. Bitte erneut suchen.");
         MagnetLink.Validate(download.MagnetUri);
-        var warning = download.IsLikely ? "" : "Achtung: Die Titelzuordnung ist unsicher. Prüfe zuerst die Quellseite.\n\n";
-        if (!await ConfirmAsync("Download starten?",
-                $"{warning}„{download.Title}“ von {download.SourceName} wird an {snapshot.Settings.QBitUrl} übergeben. Titel und Dateien wurden nicht überprüft. Lade nur Inhalte, für die du die nötigen Rechte besitzt. Anschließend installierst du das Spiel manuell und verknüpfst seine EXE. Es wird kein Setup automatisch ausgeführt.",
-                "Download starten")) return;
-        var current = await repository.ReadAsync();
-        if (!current.Settings.SourceUrls.Contains(download.SourceUrl, StringComparer.Ordinal))
-            throw new InvalidOperationException("Diese Quelle wurde inzwischen entfernt. Bitte erneut suchen.");
-        if (current.Settings.QBitUrl != snapshot.Settings.QBitUrl)
-            throw new InvalidOperationException("Die qBittorrent-Verbindung wurde geändert. Bitte erneut versuchen.");
-        state = current;
-        using var client = CreateQBitClient();
-        await client.AddAsync(download.MagnetUri);
-        Notify("Download übergeben", "Den Fortschritt findest du unter Downloads. Danach manuell installieren und die EXE in den Spieleinstellungen verknüpfen.");
+        await StartManagedDownloadAsync(game, download.MagnetUri,
+            $"„{download.Title}“ von {download.SourceName}" +
+            (download.IsCollection ? "\nAchtung: Sammlung mit mehreren Spielen, kein Einzelspiel-Download." :
+                download.IsLikely ? "" : "\nZusätzliche Release-Angaben bitte auf der Quellseite prüfen."), snapshot.Settings);
     }
 
     private void RenderSourceSettings(StackPanel form)

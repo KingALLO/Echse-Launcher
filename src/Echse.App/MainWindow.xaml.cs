@@ -67,6 +67,8 @@ public sealed partial class MainWindow : Window
         AppWindow.Closing += OnClosing;
         timer.Tick += async (_, _) =>
         {
+            if (ready && !closing && !installationBusy && !startingDownload && activeDialog is null)
+                await RunAsync(CheckInstallationsAsync);
             if (ready && page == "downloads" && activeDialog is null && !closing)
                 await RunAsync(RefreshDownloadsAsync);
             else if (ready && page == "library-game" && activeDialog is null && !closing)
@@ -179,7 +181,7 @@ public sealed partial class MainWindow : Window
                 RenderLibraryGamePage();
                 if (selectedGame is { } libraryGame)
                     await Task.WhenAll(RefreshLibraryGameDataAsync(), EnsureSourceSearchAsync(libraryGame),
-                        RefreshGameStorageAsync(libraryGame, loadRequirements: true));
+                        RefreshGameStorageAsync(libraryGame, loadRequirements: true), RefreshLibraryGameStatusAsync());
                 else
                     await RefreshLibraryGameDataAsync();
                 break;
@@ -388,7 +390,7 @@ public sealed partial class MainWindow : Window
         var download = GameInstallation.ResolveDownload(game, state.Settings, state.CatalogCache);
         if (download.Source is not null)
         {
-            body.Children.Add(Text("Downloads werden an deinen qBittorrent-Server übergeben. Installation und EXE-Auswahl erfolgen anschließend manuell.", 12, Muted));
+            body.Children.Add(Text("Wähle einen Downloadordner. Echse entpackt lokale Downloads und fragt vor jedem Setup-Start nach.", 12, Muted));
             body.Children.Add(Button("Mit qBittorrent herunterladen", () => DownloadGameAsync(game)));
         }
         else body.Children.Add(Text(download.UnavailableReason!, 12, Muted));
@@ -619,6 +621,17 @@ public sealed partial class MainWindow : Window
         }, true));
         var form = new StackPanel { Spacing = 18, MaxWidth = 740, HorizontalAlignment = HorizontalAlignment.Left };
         RenderSourceSettings(form);
+        form.Children.Add(Text("Download-Basisordner", 22));
+        form.Children.Add(Text(string.IsNullOrWhiteSpace(state.Settings.DownloadDirectory)
+            ? "Wird beim ersten Download ausgewählt." : state.Settings.DownloadDirectory, 14, Muted));
+        form.Children.Add(Button("Downloadordner auswählen", async () =>
+        {
+            var selected = await PickDownloadDirectoryAsync();
+            if (selected is null) return;
+            var path = GameInstallation.ValidateDirectory(selected);
+            await repository.UpdateAsync(current => current.Settings.DownloadDirectory = path);
+            await RenderAsync();
+        }));
         form.Children.Add(new Border { Height = 1, Background = SurfaceBorder, Margin = new Thickness(0, 8, 0, 8) });
         form.Children.Add(Text("Spielekatalog", 22));
         form.Children.Add(Text("Der Katalog liefert Titel, Genres, Popularität und optionale Magnet-Links. qBittorrent übernimmt nur die Downloads und ist keine Spiele-Suchmaschine.", 14, Muted));
@@ -650,6 +663,7 @@ public sealed partial class MainWindow : Window
             await repository.UpdateAsync(current =>
             {
                 settings.SourceUrls = current.Settings.SourceUrls;
+                settings.DownloadDirectory = current.Settings.DownloadDirectory;
                 if (!string.Equals(current.Settings.CatalogUrl, address, StringComparison.Ordinal))
                 {
                     current.CatalogCache.Clear();
@@ -708,7 +722,7 @@ public sealed partial class MainWindow : Window
         heading.Children.Add(Text("Downloads", 34));
         heading.Children.Add(Button("Aktualisieren", RefreshDownloadsAsync));
         PageHost.Children.Add(heading);
-        PageHost.Children.Add(Text("Zeigt mit „echse“ markierte Torrents. Dateien liegen auf deinem qBittorrent-Server, nicht automatisch auf diesem PC. Installation erfolgt manuell.", 14, Muted));
+        PageHost.Children.Add(Text("Lokale Downloads werden im gewählten Spielordner abgelegt und entpackt. Setups starten nur mit deiner Freigabe. Entfernte Server bleiben reine Downloads.", 14, Muted));
         downloadUpdated = Text("Wird geladen …", 12, Muted);
         PageHost.Children.Add(downloadUpdated);
         downloadList = new StackPanel { Spacing = 14 };
@@ -725,11 +739,12 @@ public sealed partial class MainWindow : Window
         try
         {
             state = await repository.ReadAsync();
+            target.Children.Clear();
+            RenderInstallationJobs(target);
             using var client = CreateQBitClient();
             var downloads = await client.GetDownloadsAsync();
             if (target != downloadList || closing) return;
-            target.Children.Clear();
-            if (downloads.Count == 0)
+            if (downloads.Count == 0 && state.Library.All(entry => entry.Download is null))
                 target.Children.Add(Empty("Keine Echse-Downloads", "Starte einen Download über die Spieldetails. Andere Torrents blendet Echse aus."));
             foreach (var torrent in downloads)
             {
@@ -751,8 +766,11 @@ public sealed partial class MainWindow : Window
         finally { downloadsLoading = false; }
     }
 
-    private QBitClient CreateQBitClient() => new(state.Settings.QBitUrl, state.Settings.QBitUsername,
-        LocalServices.Unprotect(state.Settings.ProtectedPassword));
+    private QBitClient CreateQBitClient(ConnectionSettings? settings = null)
+    {
+        settings ??= state.Settings;
+        return new(settings.QBitUrl, settings.QBitUsername, LocalServices.Unprotect(settings.ProtectedPassword));
+    }
 
     private async Task<string?> PickAsync(params string[] extensions)
     {
@@ -847,6 +865,11 @@ public sealed partial class MainWindow : Window
     {
         if (closing) return;
         args.Cancel = true;
+        if (installationBusy || startingDownload)
+        {
+            Notify("Installation wird verarbeitet", "Bitte die laufende Verarbeitung bzw. das Setup abschließen, bevor du Echse schließt.");
+            return;
+        }
         if (activeDialog is not null)
         {
             Notify("Dialog noch geöffnet", "Bitte schließe zuerst den geöffneten Dialog.");
@@ -866,7 +889,7 @@ public sealed partial class MainWindow : Window
         Close();
     }
 
-    private Button Button(object content, Func<Task> action, bool primary = false)
+    private Button Button(object content, Func<Task> action, bool primary = false, Func<bool>? canExecute = null)
     {
         var button = ThemeCorners(new Button { Content = content, Padding = new Thickness(14, 8, 14, 8),
             VerticalAlignment = VerticalAlignment.Center });
@@ -877,9 +900,10 @@ public sealed partial class MainWindow : Window
         }
         button.Click += async (_, _) =>
         {
+            if (canExecute?.Invoke() == false) return;
             button.IsEnabled = false;
             try { await RunAsync(action); }
-            finally { button.IsEnabled = true; }
+            finally { button.IsEnabled = canExecute?.Invoke() ?? true; }
         };
         return button;
     }

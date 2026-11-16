@@ -10,6 +10,18 @@ public static class GameInstallation
         Path.GetExtension(entry.ExecutablePath).Equals(".exe", StringComparison.OrdinalIgnoreCase) &&
         File.Exists(entry.ExecutablePath);
 
+    public static void LinkExecutable(LibraryEntry entry, string executable)
+    {
+        if (!IsInstalled(new LibraryEntry { ExecutablePath = executable }))
+            throw new IOException("Die ausgewählte Spiel-EXE wurde nicht gefunden.");
+        entry.ExecutablePath = executable;
+        if (entry.Download is { } download)
+        {
+            download.Phase = InstallationPhase.Installed;
+            download.Error = null;
+        }
+    }
+
     public static GameDownload ResolveDownload(Game game, ConnectionSettings settings, IReadOnlyList<Game> catalog)
     {
         if (string.IsNullOrWhiteSpace(settings.CatalogUrl))

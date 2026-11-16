@@ -139,10 +139,12 @@ public sealed class LauncherTests
             var body = await request.Content!.ReadAsStringAsync();
             Assert.Contains("tags=echse", body);
             Assert.Contains("urls=magnet", body);
+            Assert.Contains("savepath=" + Uri.EscapeDataString(Path.Combine(Path.GetTempPath(), "Half_Life_1", "Download")), body);
+            Assert.Contains("autoTMM=false", body);
             return Text("Ok.");
         });
         using var client = new QBitClient("https://server.example/qbit", "user", "secret", handler);
-        await client.AddAsync(Magnet);
+        await client.AddAsync(Magnet, Path.Combine(Path.GetTempPath(), "Half_Life_1", "Download"));
         Assert.Equal(2, loginCount);
         Assert.Equal(2, addCount);
     }
@@ -173,6 +175,93 @@ public sealed class LauncherTests
         var torrent = Assert.Single(await client.GetDownloadsAsync());
         Assert.Equal(0.5, torrent.Progress);
         Assert.Equal(2048, torrent.DownloadSpeed);
+    }
+
+    [Fact]
+    public async Task QBitLooksUpTheExactTorrentEvenWithoutTheEchseTag()
+    {
+        var hash = MagnetLink.GetInfoHash(Magnet);
+        using var client = new QBitClient("http://localhost:8080", "", "",
+            new StubHandler((request, _) =>
+            {
+                if (request.RequestUri!.AbsolutePath.EndsWith("/auth/login")) return Task.FromResult(Text("Ok."));
+                Assert.Equal("?hashes=" + hash.ToLowerInvariant(), request.RequestUri.Query);
+                return Task.FromResult(Json($$"""
+                    [{"hash":"{{hash.ToLowerInvariant()}}","name":"Half-Life","progress":1,"state":"stalledUP",
+                      "amount_left":0,"save_path":"C:\\Games\\Half_Life\\Download"}]
+                    """));
+            }));
+        var torrent = await client.GetTorrentAsync(hash);
+        Assert.NotNull(torrent);
+        Assert.True(torrent.IsComplete);
+        Assert.Equal(@"C:\Games\Half_Life\Download", torrent.SavePath);
+    }
+
+    [Fact]
+    public async Task QBitPollingReadsCurrentProgressSizeSpeedAndEtaForTheLinkedHash()
+    {
+        var hash = MagnetLink.GetInfoHash(Magnet);
+        var snapshots = new Queue<string>(
+        [
+            $$"""[{"hash":"{{hash}}","name":"Game","progress":0.533,"state":"downloading","dlspeed":10276045,"total_size":12000000000,"completed":6396000000,"amount_left":5604000000,"eta":545}]""",
+            $$"""[{"hash":"{{hash}}","name":"Game","progress":0.817,"state":"downloading","dlspeed":8388608,"total_size":12000000000,"completed":9804000000,"amount_left":2196000000,"eta":262}]""",
+            $$"""[{"hash":"{{hash}}","name":"Game","progress":1,"state":"checkingUP","dlspeed":0,"total_size":12000000000,"completed":12000000000,"amount_left":0,"eta":8640000}]""",
+            $$"""[{"hash":"{{hash}}","name":"Game","progress":1,"state":"stalledUP","dlspeed":0,"total_size":12000000000,"completed":12000000000,"amount_left":0,"eta":8640000}]"""
+        ]);
+        using var client = new QBitClient("http://localhost:8080", "", "",
+            new StubHandler((request, _) =>
+            {
+                if (request.RequestUri!.AbsolutePath.EndsWith("/auth/login")) return Task.FromResult(Text("Ok."));
+                Assert.Equal("?hashes=" + hash.ToLowerInvariant(), request.RequestUri.Query);
+                return Task.FromResult(Json(snapshots.Dequeue()));
+            }));
+        var first = await client.GetTorrentAsync(hash);
+        Assert.NotNull(first);
+        Assert.Equal(0.533, first.Progress);
+        Assert.Equal(12000000000, first.TotalSize);
+        Assert.Equal(6396000000, first.CompletedBytes);
+        Assert.Equal(10276045, first.DownloadSpeed);
+        Assert.Equal(545, first.EtaSeconds);
+        var second = await client.GetTorrentAsync(hash);
+        Assert.NotNull(second);
+        Assert.Equal(0.817, second.Progress);
+        Assert.Equal(9804000000, second.CompletedBytes);
+        Assert.Equal(262, second.EtaSeconds);
+        Assert.False(second.IsComplete);
+        var checking = await client.GetTorrentAsync(hash);
+        Assert.NotNull(checking);
+        Assert.Equal(1, checking.Progress);
+        Assert.False(checking.IsComplete);
+        Assert.True((await client.GetTorrentAsync(hash))!.IsComplete);
+        Assert.Empty(snapshots);
+    }
+
+    [Fact]
+    public async Task QBitPollingDoesNotSubstituteOldProgressOnConnectionFailureOrAMissingTorrent()
+    {
+        var hash = MagnetLink.GetInfoHash(Magnet);
+        var poll = 0;
+        using var client = new QBitClient("http://localhost:8080", "", "",
+            new StubHandler((request, _) =>
+            {
+                if (request.RequestUri!.AbsolutePath.EndsWith("/auth/login")) return Task.FromResult(Text("Ok."));
+                poll++;
+                return Task.FromResult(poll switch
+                {
+                    1 => Json($$"""[{"hash":"{{hash}}","name":"Game","progress":0.533,"completed":533,"total_size":1000,"eta":30}]"""),
+                    2 => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable),
+                    3 => Json("[]"),
+                    _ => Json($$"""[{"hash":"{{hash}}","name":"Game","progress":0.9,"completed":900,"total_size":1000,"eta":5}]""")
+                });
+            }));
+        Assert.Equal(533, (await client.GetTorrentAsync(hash))!.CompletedBytes);
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.GetTorrentAsync(hash));
+        Assert.Null(await client.GetTorrentAsync(hash));
+        var recovered = await client.GetTorrentAsync(hash);
+        Assert.NotNull(recovered);
+        Assert.Equal(0.9, recovered.Progress);
+        Assert.Equal(900, recovered.CompletedBytes);
+        Assert.Equal(5, recovered.EtaSeconds);
     }
 
     [Fact]

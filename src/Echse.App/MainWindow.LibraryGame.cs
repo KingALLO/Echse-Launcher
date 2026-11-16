@@ -15,6 +15,7 @@ public sealed partial class MainWindow
     private TextBlock? libraryStorageHint;
     private Action<LibraryEntry>? refreshLibraryGameStatus;
     private string? libraryReturnGameId;
+    private bool libraryStatusLoading;
 
     private async Task OpenLibraryGameAsync(Game game)
     {
@@ -46,6 +47,17 @@ public sealed partial class MainWindow
         actionBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         actionBar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         actionBar.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        bool CanUsePrimary()
+        {
+            var current = state.Library.FirstOrDefault(item => item.Game.Id == game.Id);
+            if (current is null || tracker.IsRunning(game.Id)) return false;
+            if (GameInstallation.IsInstalled(current)) return true;
+            if (installationBusy) return false;
+            if (current.Download is { } job)
+                return job.Phase is not (InstallationPhase.Downloading or InstallationPhase.Preparing);
+            return SourceDownloads(current.Game).Count > 0 ||
+                GameInstallation.ResolveDownload(current.Game, state.Settings, state.CatalogCache).Source is not null;
+        }
         var primary = Button("", async () =>
         {
             var current = (await repository.ReadAsync()).Library.Single(item => item.Game.Id == game.Id);
@@ -55,10 +67,12 @@ public sealed partial class MainWindow
                 await RenderAsync();
                 Notify("Spiel gestartet", "Deine Spielzeit wird erfasst, solange Echse geöffnet bleibt.");
             }
+            else if (current.Download is not null)
+                await ProcessInstallationAsync(game.Id);
             else if (SourceDownloads(current.Game).Count > 0)
                 await ShowSourceDownloadChoiceAsync(current.Game);
             else await DownloadGameAsync(current.Game);
-        }, true);
+        }, true, CanUsePrimary);
         primary.Width = 190;
         primary.Height = 48;
         primary.FontSize = 18;
@@ -101,6 +115,8 @@ public sealed partial class MainWindow
         body.Children.Add(actionBar);
         var status = Text("", 13, Muted);
         body.Children.Add(status);
+        var progress = new StackPanel { Spacing = 8 };
+        body.Children.Add(progress);
         refreshLibraryGameStatus = current =>
         {
             var running = tracker.IsRunning(current.Game.Id);
@@ -112,25 +128,42 @@ public sealed partial class MainWindow
                 SearchMatches(search, current.Game, state.Settings);
             var downloadStatus = sourceMatches > 0
                     ? $"{sourceMatches} Treffer in deinen Quellen · Titel und Quelle vor dem Download prüfen."
-                : download.Source is not null ? "Download im Katalog verfügbar · anschließend manuell installieren und die EXE verknüpfen."
+                : download.Source is not null ? "Download im Katalog verfügbar · Ordner wählen und Installation starten."
                 : searching ? "Deine Download-Quellen werden durchsucht …"
-                : hasSources ? "In deinen Quellen wurde kein passender Download gefunden."
+                : hasSources ? "In deinen Quellen wurde kein passender Download gefunden · nicht jedes Steam-Spiel wird dort angeboten."
                 : string.IsNullOrWhiteSpace(state.Settings.CatalogUrl)
                     ? "Keine Download-Quellen eingerichtet. Füge in den Einstellungen Quellen hinzu."
                     : download.UnavailableReason!;
-            primary.Content = running ? "Spiel läuft" : installed ? "▶  Spielen" : "↓  Installieren";
-            primary.IsEnabled = !running && (installed || download.Source is not null || sourceMatches > 0);
-            AutomationProperties.SetName(primary, running ? "Spiel läuft" : installed ? "Spiel starten" : "Spiel installieren");
+            var pending = current.Download is not null;
+            var phase = current.Download?.Phase;
+            var torrentState = current.Download is { } job ? ProgressFor(job)?.Torrent?.State : null;
+            primary.Content = running ? "Spiel läuft" : installed ? "▶  Spielen"
+                : phase == InstallationPhase.Downloading ? torrentState switch
+                {
+                    "pausedDL" or "stoppedDL" => "Download pausiert",
+                    "checkingDL" or "checkingUP" or "checkingResumeData" => "Wird überprüft …",
+                    "moving" => "Wird verschoben …",
+                    _ => "Download läuft"
+                }
+                : phase == InstallationPhase.Preparing ? "Wird entpackt …"
+                : phase == InstallationPhase.AwaitingSetup ? "Setup freigeben"
+                : phase == InstallationPhase.Failed ? "Erneut versuchen"
+                : pending ? "EXE suchen" : "↓  Installieren";
+            primary.IsEnabled = CanUsePrimary();
+            AutomationProperties.SetName(primary, primary.Content.ToString() ?? "");
+            RenderTorrentProgress(progress, installed ? null : current.Download);
             lastPlayed.Text = FormatDate(current.LastPlayed);
             playtime.Text = Playtime(current.PlaySeconds);
             status.Text = running ? "Wird gerade gespielt · Spielzeit wird automatisch gespeichert."
                 : installed ? "Installiert · lokale Spieldatei verknüpft"
+                : pending ? InstallationStatus(current.Download!)
                 : current.ExecutablePath is not null
                     ? "Die verknüpfte Spieldatei wurde nicht gefunden. " + downloadStatus
                     : downloadStatus;
             ToolTipService.SetToolTip(primary, installed ? current.ExecutablePath
+                : pending ? InstallationStatus(current.Download!)
                 : sourceMatches > 0 ? "Treffer aus deinen Quellen prüfen und an qBittorrent übergeben."
-                : download.Source is not null ? "Download an deinen qBittorrent-Server übergeben. Es wird kein Setup automatisch ausgeführt."
+                : download.Source is not null ? "Downloadordner wählen. Jedes Setup benötigt deine Freigabe."
                 : downloadStatus);
         };
         refreshLibraryGameStatus(entry);
@@ -219,12 +252,30 @@ public sealed partial class MainWindow
 
     private async Task RefreshLibraryGameStatusAsync()
     {
+        if (libraryStatusLoading) return;
+        libraryStatusLoading = true;
         var version = renderVersion;
-        var current = await repository.ReadAsync();
-        if (version != renderVersion || page != "library-game" || closing) return;
-        state = current;
-        if (state.Library.FirstOrDefault(item => item.Game.Id == selectedGame?.Id) is { } entry)
-            refreshLibraryGameStatus?.Invoke(entry);
+        try
+        {
+            var current = await repository.ReadAsync();
+            if (version != renderVersion || page != "library-game" || closing) return;
+            var entry = current.Library.FirstOrDefault(item => item.Game.Id == selectedGame?.Id);
+            if (entry?.Download is { FilesPrepared: false, Phase: not InstallationPhase.Installed } job &&
+                (ProgressFor(job) is not { } snapshot || DateTimeOffset.UtcNow - snapshot.CheckedAt >= TimeSpan.FromSeconds(4)))
+                await ReadInstallationTorrentAsync(current.Settings, job);
+        }
+        catch (Exception exception) { ShowError(exception); }
+        finally
+        {
+            libraryStatusLoading = false;
+            var current = await repository.ReadAsync();
+            if (version == renderVersion && page == "library-game" && !closing)
+            {
+                state = current;
+                if (state.Library.FirstOrDefault(item => item.Game.Id == selectedGame?.Id) is { } entry)
+                    refreshLibraryGameStatus?.Invoke(entry);
+            }
+        }
     }
 
     private async Task RefreshLibraryGameDataAsync()
@@ -322,20 +373,26 @@ public sealed partial class MainWindow
         if (tracker.IsRunning(gameId)) throw new InvalidOperationException("Das Spiel läuft bereits.");
         var path = await PickAsync(".exe");
         if (path is null || closing) return;
+        if (installationBusy) throw new InvalidOperationException("Bitte zuerst die laufende Installation abwarten.");
         await repository.UpdateAsync(current =>
-            current.Library.Single(item => item.Game.Id == gameId).ExecutablePath = path);
+        {
+            var entry = current.Library.Single(item => item.Game.Id == gameId);
+            GameInstallation.LinkExecutable(entry, path);
+        });
         await RenderAsync();
         Notify("Spieldatei verknüpft", "Das Spiel kann jetzt über „Spielen“ gestartet werden.");
     }
 
     private async Task SelectGameDirectoryAsync(string gameId)
     {
+        if (installationBusy) throw new InvalidOperationException("Bitte zuerst die laufende Installation abwarten.");
         await CloseDialogAsync();
         var picker = new FolderPicker();
         WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
         picker.FileTypeFilter.Add("*");
         var directory = await picker.PickSingleFolderAsync();
         if (directory is null || closing) return;
+        if (installationBusy) throw new InvalidOperationException("Bitte zuerst die laufende Installation abwarten.");
         var path = GameInstallation.ValidateDirectory(directory.Path);
         await repository.UpdateAsync(current =>
             current.Library.Single(item => item.Game.Id == gameId).InstallationDirectory = path);
@@ -344,10 +401,12 @@ public sealed partial class MainWindow
 
     private async Task RemoveLibraryGameAsync(string gameId)
     {
+        if (installationBusy) throw new InvalidOperationException("Bitte zuerst die laufende Installation abwarten.");
         if (!await ConfirmAsync("Spiel entfernen?",
                 "Spieldateien bleiben erhalten. Die lokal gespeicherte Spielzeit und Favoritenmarkierung werden entfernt.", "Entfernen"))
             return;
         if (tracker.IsRunning(gameId)) throw new InvalidOperationException("Laufende Spiele können nicht entfernt werden.");
+        if (installationBusy || startingDownload) throw new InvalidOperationException("Bitte zuerst den laufenden Installationsablauf abschließen.");
         await repository.UpdateAsync(current => current.Library.RemoveAll(item => item.Game.Id == gameId));
         if (page == "library-game") page = "library";
         await RenderAsync();
@@ -379,18 +438,7 @@ public sealed partial class MainWindow
                 await RenderAsync();
                 return;
             }
-            if (!await ConfirmAsync("Download zur Installation starten?",
-                    $"„{game.Title}“ wird über {snapshot.Settings.QBitUrl} heruntergeladen. Lade nur Inhalte, für die du die nötigen Rechte besitzt. Anschließend installierst du das Spiel manuell und verknüpfst seine EXE. Es wird kein Setup automatisch ausgeführt.",
-                    "Download starten")) return;
-            token.ThrowIfCancellationRequested();
-            var current = await repository.ReadAsync();
-            if (current.Settings.CatalogUrl != snapshot.Settings.CatalogUrl ||
-                current.Settings.QBitUrl != snapshot.Settings.QBitUrl)
-                throw new InvalidOperationException("Die Serververbindung wurde geändert. Bitte erneut versuchen.");
-            state = current;
-            using var client = CreateQBitClient();
-            await client.AddAsync(source.MagnetUri!, token);
-            Notify("Download übergeben", "Den Fortschritt findest du unter Downloads. Danach manuell installieren und die EXE in den Spieleinstellungen verknüpfen.");
+            await StartManagedDownloadAsync(game, source.MagnetUri!, $"Download aus dem Katalog: {source.Title}", snapshot.Settings);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }
