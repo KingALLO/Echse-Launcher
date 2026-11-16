@@ -77,7 +77,7 @@ public sealed partial class MainWindow
         }
         var lastPlayed = AddStatistic("ZULETZT GESPIELT", 0);
         var playtime = AddStatistic("GESAMTSPIELZEIT", 1);
-        libraryStorageValue = AddStatistic("SPEICHERBEDARF", 2);
+        libraryStorageValue = AddStatistic("LOKAL BELEGT", 2);
         libraryStorageValue.Text = entry.InstallationDirectory is null ? "Ordner auswählen" : "Wird ermittelt …";
         var settings = Button(new FontIcon { Glyph = "\uE713", FontSize = 20 },
             () => ShowLibraryGameSettingsAsync(game.Id));
@@ -148,6 +148,7 @@ public sealed partial class MainWindow
         body.Children.Add(links);
         if (game.SteamAppId is int appId)
             body.Children.Add(StoreLink("Auf Steam ansehen ↗", $"https://store.steampowered.com/app/{appId}/"));
+        body.Children.Add(RenderGameStorage(game));
         sourceGameHost = new StackPanel();
         RenderSourceGameContent(game);
         body.Children.Add(Panel(sourceGameHost));
@@ -230,8 +231,6 @@ public sealed partial class MainWindow
     {
         var entry = state.Library.Single(item => item.Game.Id == selectedGame?.Id);
         var newsHost = libraryNewsHost!;
-        var storage = libraryStorageValue!;
-        var hint = libraryStorageHint!;
         var token = BeginOnlineRequest();
         var version = renderVersion;
         bool Current() => !token.IsCancellationRequested && version == renderVersion && !closing;
@@ -272,26 +271,7 @@ public sealed partial class MainWindow
                 newsHost.Children.Add(Button("Erneut versuchen", RenderAsync));
             }
         }
-        async Task StorageAsync()
-        {
-            if (entry.InstallationDirectory is null) return;
-            try
-            {
-                var bytes = await GameInstallation.MeasureDirectoryAsync(entry.InstallationDirectory, token);
-                if (!Current()) return;
-                storage.Text = FormatStorage(bytes);
-                hint.Text = entry.InstallationDirectory + "\nDateigrößen inklusive Unterordnern, ohne Datei- und Ordnerverknüpfungen.";
-            }
-            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-            catch (Exception exception)
-            {
-                LocalServices.Log(exception);
-                if (!Current()) return;
-                storage.Text = "Nicht ermittelbar";
-                hint.Text = "Speicherbedarf konnte nicht gelesen werden: " + exception.Message;
-            }
-        }
-        await Task.WhenAll(NewsAsync(), StorageAsync());
+        await NewsAsync();
     }
 
     private async Task ShowLibraryGameSettingsAsync(string gameId)

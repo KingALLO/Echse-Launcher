@@ -221,6 +221,46 @@ public sealed class SteamCatalogTests
         Assert.Empty(game.Requirements[1].Recommended);
     }
 
+    [Theory]
+    [InlineData("Speicherplatz: 45 GB verfügbarer Speicherplatz", "45 GB verfügbarer Speicherplatz")]
+    [InlineData("Storage: 12.5 GB available space (SSD required)", "12.5 GB available space (SSD required)")]
+    [InlineData("Hard Drive: 7,5 GB HD space", "7,5 GB HD space")]
+    [InlineData("Festplattenspeicher: 500 MB", "500 MB")]
+    [InlineData("Storage:\n20 GB available space", "20 GB available space")]
+    [InlineData("Memory: 16 GB RAM", null)]
+    [InlineData("Graphics: 8 GB VRAM\nAdditional Notes: SSD recommended", null)]
+    [InlineData("Storage:\nMemory: 16 GB RAM", null)]
+    [InlineData("Storage: SSD required", null)]
+    public void StorageSummaryExtractsOnlyLabeledCapacityAndPreservesQualifier(string text, string? expected)
+    {
+        var game = new Game
+        {
+            Requirements = [new SystemRequirements { Platform = "Windows", Minimum = text }]
+        };
+        Assert.Equal(expected, GameStorageRequirements.ForWindows(game).Minimum);
+    }
+
+    [Fact]
+    public async Task StorageSummaryUsesWindowsAndKeepsMinimumSeparateFromRecommended()
+    {
+        using var client = Client("""
+            {"620":{"success":true,"data":{"steam_appid":620,"type":"game","name":"Portal",
+              "pc_requirements":{"minimum":"<ul><li>RAM: 8 GB</li><li><strong>Speicherplatz:</strong> 20 GB verfügbarer Speicherplatz</li></ul>",
+                "recommended":"<p>Speicherplatz: 30 GB verfügbarer Speicherplatz (SSD)</p>"},
+              "linux_requirements":{"minimum":"Storage: 15 GB available space"}}}}
+            """);
+        var game = await new SteamCatalogService(client).GetDetailsAsync(620);
+        var storage = GameStorageRequirements.ForWindows(game);
+        Assert.Equal("20 GB verfügbarer Speicherplatz", storage.Minimum);
+        Assert.Equal("30 GB verfügbarer Speicherplatz (SSD)", storage.Recommended);
+        Assert.Equal(new GameStorageRequirements(null, null),
+            GameStorageRequirements.ForWindows(game with
+            {
+                Requirements = game.Requirements.Where(item => item.Platform == "Linux").ToArray()
+            }));
+        Assert.Equal(new GameStorageRequirements(null, null), GameStorageRequirements.ForWindows(new Game()));
+    }
+
     [Fact]
     public async Task MissingSearchArrayAndMissingHomeCategoriesAreErrorsNotEmptySuccesses()
     {

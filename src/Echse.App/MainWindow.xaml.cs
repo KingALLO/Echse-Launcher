@@ -145,6 +145,7 @@ public sealed partial class MainWindow : Window
     {
         CancelOnlineRequest();
         CancelSourceSearchOnNavigation();
+        gameStorageCancellation?.Cancel();
         renderVersion++;
         state = await repository.ReadAsync();
         refreshLibrary = null;
@@ -153,6 +154,8 @@ public sealed partial class MainWindow : Window
         libraryNewsHost = null;
         libraryStorageValue = null;
         libraryStorageHint = null;
+        gameStorageRequirementsHost = null;
+        gameStorageUsedValue = null;
         PageHost.Children.Clear();
         if (ShowingLibrary)
         {
@@ -175,7 +178,8 @@ public sealed partial class MainWindow : Window
             case "library-game":
                 RenderLibraryGamePage();
                 if (selectedGame is { } libraryGame)
-                    await Task.WhenAll(RefreshLibraryGameDataAsync(), EnsureSourceSearchAsync(libraryGame));
+                    await Task.WhenAll(RefreshLibraryGameDataAsync(), EnsureSourceSearchAsync(libraryGame),
+                        RefreshGameStorageAsync(libraryGame, loadRequirements: true));
                 else
                     await RefreshLibraryGameDataAsync();
                 break;
@@ -185,8 +189,11 @@ public sealed partial class MainWindow : Window
             case "downloads": await RenderDownloadsAsync(); break;
             case "game":
                 RenderGamePage();
-                if (!gameDetailsLoading && gameDetailsError is null && selectedGame?.SteamAppId is not null)
-                    await RefreshKeyPriceAsync(selectedGame);
+                if (selectedGame is { } storeGame)
+                    await Task.WhenAll(
+                        !gameDetailsLoading && gameDetailsError is null && storeGame.SteamAppId is not null
+                            ? RefreshKeyPriceAsync(storeGame) : Task.CompletedTask,
+                        !gameDetailsLoading ? RefreshGameStorageAsync(storeGame) : Task.CompletedTask);
                 break;
             default: RenderStore(); break;
         }
@@ -847,6 +854,7 @@ public sealed partial class MainWindow : Window
         }
         closing = true;
         sourceSearchCancellation.Cancel();
+        gameStorageCancellation?.Cancel();
         CancelActiveSourceSearch();
         CancelOnlineRequest();
         timer.Stop();

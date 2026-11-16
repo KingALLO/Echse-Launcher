@@ -18,6 +18,9 @@ public sealed partial class MainWindow
     private string viewerTitle = "";
     private int viewerIndex;
     private Control? galleryReturnFocus;
+    private StackPanel? gameStorageRequirementsHost;
+    private TextBlock? gameStorageUsedValue;
+    private CancellationTokenSource? gameStorageCancellation;
 
     private void RenderGamePage()
     {
@@ -79,6 +82,7 @@ public sealed partial class MainWindow
         });
         if (game.Tags.Length > 0) facts.Children.Add(Text(string.Join("  ·  ", game.Tags), 12, Accent));
         PageHost.Children.Add(TwoColumns(RenderGallery(game), facts));
+        PageHost.Children.Add(RenderGameStorage(game));
 
         if (game.SteamAppId is int id)
         {
@@ -124,6 +128,115 @@ public sealed partial class MainWindow
             string.IsNullOrWhiteSpace(game.Description) ? "Noch keine Beschreibung verfügbar." : game.Description));
         if (game.SteamAppId is not null) PageHost.Children.Add(RenderRequirements(game));
         PageHost.Children.Add(Text("Metadaten und Bilder: Steam / jeweilige Rechteinhaber. Preise können sich ändern; Verfügbarkeit und Bedingungen beim Anbieter prüfen. Ein Katalogeintrag ist keine Besitz- oder Downloadberechtigung.", 11, Muted));
+    }
+
+    private FrameworkElement RenderGameStorage(Game game)
+    {
+        var section = new StackPanel { Spacing = 10 };
+        section.Children.Add(Text("Speicherplatz", 22));
+        gameStorageRequirementsHost = new StackPanel { Spacing = 6 };
+        if (gameDetailsLoading && page == "game")
+            gameStorageRequirementsHost.Children.Add(Text("Benötigter Speicherplatz: Wird von Steam geladen …", 15, Muted));
+        else
+            ShowStorageRequirements(gameStorageRequirementsHost, game);
+        section.Children.Add(gameStorageRequirementsHost);
+        section.Children.Add(Text("Steam-Angabe für Windows · benötigter freier Platz, nicht Downloadgröße oder gemessene Installation.", 12, Muted));
+        var entry = state.Library.FirstOrDefault(item => item.Game.Id == game.Id);
+        gameStorageUsedValue = Text(entry?.InstallationDirectory is not null
+            ? "Lokal belegt: Wird ermittelt …"
+            : "Lokal belegt: Nicht ermittelt – kein Installationsordner verknüpft.", 14);
+        section.Children.Add(gameStorageUsedValue);
+        if (entry is not null)
+            section.Children.Add(Button("Installationsordner auswählen", () => SelectGameDirectoryAsync(game.Id)));
+        else
+            section.Children.Add(Text("Für die lokale Messung das Spiel zur Bibliothek hinzufügen und seinen Installationsordner auswählen.", 12, Muted));
+        return Panel(section);
+    }
+
+    private static void ShowStorageRequirements(StackPanel host, Game game)
+    {
+        host.Children.Clear();
+        var storage = GameStorageRequirements.ForWindows(game);
+        if (storage.Minimum is null && storage.Recommended is null)
+            host.Children.Add(Text("Benötigter Speicherplatz: Keine Angabe verfügbar.", 15, Muted));
+        if (storage.Minimum is not null)
+            host.Children.Add(Text("Mindestens: " + storage.Minimum, 16, Accent));
+        if (storage.Recommended is not null)
+            host.Children.Add(Text("Empfohlen: " + storage.Recommended, 15));
+    }
+
+    private async Task RefreshGameStorageAsync(Game game, bool loadRequirements = false)
+    {
+        var host = gameStorageRequirementsHost!;
+        var used = gameStorageUsedValue!;
+        var statistic = libraryStorageValue;
+        var hint = libraryStorageHint;
+        var entry = state.Library.FirstOrDefault(item => item.Game.Id == game.Id);
+        using var cancellation = new CancellationTokenSource();
+        gameStorageCancellation = cancellation;
+        var token = cancellation.Token;
+        var version = renderVersion;
+        bool Current() => !token.IsCancellationRequested && version == renderVersion && !closing;
+
+        async Task RequirementsAsync()
+        {
+            if (!loadRequirements || game.SteamAppId is not int appId || game.Requirements.Length > 0) return;
+            host.Children.Clear();
+            host.Children.Add(Text("Benötigter Speicherplatz: Wird von Steam geladen …", 15, Muted));
+            try
+            {
+                var details = state.SteamDetails.FirstOrDefault(item =>
+                    item.SteamAppId == appId && item.Requirements.Length > 0) ??
+                    await steam.GetDetailsAsync(appId, token);
+                if (!Current()) return;
+                if (entry is not null) await repository.UpdateAsync(current =>
+                {
+                    var libraryEntry = current.Library.FirstOrDefault(item => item.Game.Id == game.Id);
+                    if (libraryEntry?.Game.SteamAppId == appId)
+                        libraryEntry.Game = libraryEntry.Game with { Requirements = details.Requirements };
+                });
+                if (!Current()) return;
+                ShowStorageRequirements(host, details);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch (Exception exception)
+            {
+                LocalServices.Log(exception);
+                if (!Current()) return;
+                host.Children.Clear();
+                host.Children.Add(Text("Benötigter Speicherplatz: Steam-Angabe konnte nicht geladen werden.", 14, Muted));
+                host.Children.Add(Button("Erneut versuchen", RenderAsync));
+            }
+        }
+
+        async Task MeasuredAsync()
+        {
+            if (entry?.InstallationDirectory is not { } directory) return;
+            try
+            {
+                var bytes = await GameInstallation.MeasureDirectoryAsync(directory, token);
+                if (!Current()) return;
+                used.Text = "Lokal belegt: " + FormatStorage(bytes) + " · Dateigröße des Installationsordners";
+                if (statistic is not null) statistic.Text = FormatStorage(bytes);
+                if (hint is not null)
+                    hint.Text = directory + "\nDateigrößen inklusive Unterordnern, ohne Datei- und Ordnerverknüpfungen.";
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+            catch (Exception exception)
+            {
+                LocalServices.Log(exception);
+                if (!Current()) return;
+                used.Text = "Lokal belegt: Nicht ermittelbar – " + exception.Message;
+                if (statistic is not null) statistic.Text = "Nicht ermittelbar";
+                if (hint is not null) hint.Text = "Speicherbedarf konnte nicht gelesen werden: " + exception.Message;
+            }
+        }
+
+        try { await Task.WhenAll(RequirementsAsync(), MeasuredAsync()); }
+        finally
+        {
+            if (ReferenceEquals(gameStorageCancellation, cancellation)) gameStorageCancellation = null;
+        }
     }
 
     private static FrameworkElement RenderRequirements(Game game)
